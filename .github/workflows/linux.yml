@@ -1,0 +1,169 @@
+name: Linux Build
+
+on:
+  workflow_call:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: false
+        default: 'Release'
+    secrets:
+      BUILD_TOKEN:
+        required: false
+
+jobs:
+  linux-x64:
+    name: Linux x64 GCC/Clang
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            ninja-build \
+            libboost-dev \
+            libboost-system-dev \
+            libboost-filesystem-dev \
+            libopencc-dev \
+            libyaml-cpp-dev \
+            libgtest-dev \
+            libmarisa-dev \
+            g++-14 \
+            clang-18
+
+      - name: Set Compiler
+        run: |
+          if [ "${{ matrix.compiler }}" = "gcc" ]; then
+            echo "CC=gcc-14" >> $GITHUB_ENV
+            echo "CXX=g++-14" >> $GITHUB_ENV
+          else
+            echo "CC=clang-18" >> $GITHUB_ENV
+            echo "CXX=clang++-18" >> $GITHUB_ENV
+          fi
+
+      - name: Configure
+        run: |
+          mkdir -p build/linux-x64
+          cd build/linux-x64
+          cmake ../../engine/librime \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} \
+            -DBUILD_TESTING=ON \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_C_COMPILER=$CC \
+            -DCMAKE_CXX_COMPILER=$CXX
+
+      - name: Build
+        run: |
+          cd build/linux-x64
+          ninja -j$(nproc)
+
+      - name: Test
+        run: |
+          cd build/linux-x64
+          ctest --output-on-failure -j$(nproc)
+
+      - name: Package
+        run: |
+          mkdir -p dist/linux-x64-${{ matrix.compiler }}
+          cp build/linux-x64/lib/*.a dist/linux-x64-${{ matrix.compiler }}/ 2>/dev/null || true
+          cp build/linux-x64/lib/*.so* dist/linux-x64-${{ matrix.compiler }}/ 2>/dev/null || true
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: librime-linux-x64-${{ matrix.compiler }}-${{ inputs.build_type }}
+          path: dist/**
+          retention-days: 14
+
+  # ── 龙芯 LoongArch64 ─────────────────────────────
+  linux-loongarch64:
+    name: Linux LoongArch64
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Cross-Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build \
+            gcc-loongarch64-linux-gnu g++-loongarch64-linux-gnu \
+            libboost-dev \
+            libyaml-cpp-dev
+
+      - name: Configure
+        run: |
+          mkdir -p build/linux-loongarch64
+          cd build/linux-loongarch64
+          cmake ../../engine/librime \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} \
+            -DCMAKE_C_COMPILER=loongarch64-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=loongarch64-linux-gnu-g++ \
+            -DCMAKE_SYSROOT=/usr/loongarch64-linux-gnu/sysroot
+
+      - name: Build
+        run: |
+          cd build/linux-loongarch64
+          ninja -j$(nproc)
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: librime-linux-loongarch64-${{ inputs.build_type }}
+          path: build/linux-loongarch64/lib/*.a
+          retention-days: 14
+
+  # ── 飞腾/鲲鹏 ARM64 ─────────────────────────────
+  linux-arm64:
+    name: Linux ARM64
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Cross-Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            libboost-dev \
+            libyaml-cpp-dev
+
+      - name: Configure
+        run: |
+          mkdir -p build/linux-arm64-cross
+          cd build/linux-arm64-cross
+          cmake ../../engine/librime \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} \
+            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
+            -DCMAKE_SYSROOT=/usr/aarch64-linux-gnu
+
+      - name: Build
+        run: |
+          cd build/linux-arm64-cross
+          ninja -j$(nproc)
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: librime-linux-arm64-${{ inputs.build_type }}
+          path: build/linux-arm64-cross/lib/*.a
+          retention-days: 14

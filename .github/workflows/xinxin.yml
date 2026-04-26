@@ -1,0 +1,261 @@
+# =============================================
+# SynthOrbis UNI — 信创平台 CI/CD
+# =============================================
+# 专门针对国产化平台的自动化构建
+# 支持: 统信 UOS / 麒麟 V10 / 龙芯 / 飞腾/鲲鹏
+#
+# 注意: 这些平台通常需要特定的构建环境和工具链
+# =============================================
+
+name:信创平台构建
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: '目标平台'
+        required: true
+        type: choice
+        options:
+          - uos-20    # 统信 UOS V20
+          - kylin-v10 # 麒麟 V10
+          - loongarch # 龙芯 LoongArch64
+          - phytium   # 飞腾 ARM64
+          - kunpeng   # 鲲鹏 ARM64
+          - haiguang  # 海光 x86
+          - zhaoxin   # 兆芯 x86
+          - all       # 全平台
+
+env:
+  RIME_VERSION: '1.11.0-synthorbis-1'
+
+jobs:
+  # ── 统信 UOS V20 ────────────────────────────────
+  build-uos:
+    name: 统信 UOS V20 (x86_64)
+    runs-on: ubuntu-20.04
+    if: inputs.platform == 'uos-20' || inputs.platform == 'all'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: 安装信创依赖
+        run: |
+          # 统信 UOS 基于 Debian，同样使用 apt
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build \
+            libboost-dev libboost-system-dev \
+            libopencc-dev libyaml-cpp-dev \
+            libgtest-dev libmarisa-dev \
+            gcc-10 g++-10
+
+      - name: Configure
+        run: |
+          mkdir -p build/uos-x64
+          cd build/uos-x64
+          CC=gcc-10 CXX=g++-10 cmake ../../engine/librime \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=ON \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+
+      - name: Build
+        run: |
+          cd build/uos-x64
+          ninja -j$(nproc)
+
+      - name: Package
+        run: |
+          mkdir -p dist/uos-x64
+          cp build/uos-x64/lib/*.a dist/uos-x64/ 2>/dev/null || true
+          tar -czf synthorbis-uni-$RIME_VERSION-uos-x64.tar.gz -C dist uos-x64
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthorbis-uos-x64
+          path: dist/synthorbis-uni-$RIME_VERSION-uos-x64.tar.gz
+          retention-days: 30
+
+  # ── 麒麟 V10 ─────────────────────────────────────
+  build-kylin:
+    name: 麒麟 V10 (ARM64)
+    runs-on: ubuntu-20.04
+    if: inputs.platform == 'kylin-v10' || inputs.platform == 'all'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 安装麒麟依赖
+        run: |
+          # 麒麟 V10 可能为 ARM64 或 x86_64
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build \
+            libboost-dev libyaml-cpp-dev \
+            libopencc-dev libgtest-dev
+
+      - name: Configure
+        run: |
+          mkdir -p build/kylin
+          cd build/kylin
+          cmake ../../engine/librime \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=ON
+
+      - name: Build
+        run: |
+          cd build/kylin
+          ninja -j$(nproc)
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthorbis-kylin
+          path: build/kylin/lib/*.a
+          retention-days: 30
+
+  # ── 龙芯 LoongArch64 ─────────────────────────────
+  build-loongarch:
+    name: 龙芯 LoongArch64
+    runs-on: ubuntu-20.04
+    if: inputs.platform == 'loongarch' || inputs.platform == 'all'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 安装龙芯工具链
+        run: |
+          # 方式1: 使用 Loongnix 仓库
+          # 方式2: 使用交叉编译
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            cmake ninja-build \
+            gcc-loongarch64-linux-gnu g++-loongarch64-linux-gnu \
+            libboost-dev libyaml-cpp-dev
+
+      - name: Configure
+        run: |
+          mkdir -p build/loongarch64
+          cd build/loongarch64
+          cmake ../../engine/librime \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=loongarch64-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=loongarch64-linux-gnu-g++ \
+            -DCMAKE_SYSROOT=/usr/loongarch64-linux-gnu
+
+      - name: Build
+        run: |
+          cd build/loongarch64
+          ninja -j$(nproc)
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthorbis-loongarch64
+          path: build/loongarch64/lib/*.a
+          retention-days: 30
+
+  # ── 飞腾/鲲鹏 ARM64 ─────────────────────────────
+  build-arm64:
+    name: 飞腾/鲲鹏 ARM64
+    runs-on: ubuntu-20.04
+    if: inputs.platform == 'phytium' || inputs.platform == 'kunpeng' || inputs.platform == 'all'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 安装 ARM64 工具链
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            cmake ninja-build \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            libboost-dev libyaml-cpp-dev \
+            libopencc-dev
+
+      - name: Configure
+        run: |
+          mkdir -p build/arm64-cross
+          cd build/arm64-cross
+          cmake ../../engine/librime \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
+
+      - name: Build
+        run: |
+          cd build/arm64-cross
+          ninja -j$(nproc)
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthorbis-arm64
+          path: build/arm64-cross/lib/*.a
+          retention-days: 30
+
+  # ── 海光/兆芯 x86 ────────────────────────────────
+  build-x86:
+    name: 海光/兆芯 x86_64
+    runs-on: ubuntu-20.04
+    if: inputs.platform == 'haiguang' || inputs.platform == 'zhaoxin' || inputs.platform == 'all'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 安装依赖
+        run: |
+          # 海光和兆芯均为 x86_64 架构，标准 GCC 工具链即可
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build \
+            libboost-dev libboost-system-dev \
+            libopencc-dev libyaml-cpp-dev \
+            libgtest-dev libmarisa-dev
+
+      - name: Configure
+        run: |
+          mkdir -p build/x86_64
+          cd build/x86_64
+          cmake ../../engine/librime \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=ON
+
+      - name: Build
+        run: |
+          cd build/x86_64
+          ninja -j$(nproc)
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthorbis-x86_64
+          path: build/x86_64/lib/*.a
+          retention-days: 30
+
+  # ── 全平台汇总报告 ───────────────────────────────
+  summary:
+    name: 构建汇总
+    runs-on: ubuntu-latest
+    needs: [build-uos, build-kylin, build-loongarch, build-arm64, build-x86]
+    if: always()
+    steps:
+      - name: 生成报告
+        run: |
+          echo "## 信创平台构建汇总" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 平台 | 架构 | 状态 | 产物 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 统信 UOS | x86_64 | ${{ needs.build-uos.result }} | librime-uos-x64 |" >> $GITHUB_STEP_SUMMARY
+          echo "| 麒麟 V10 | ARM64 | ${{ needs.build-kylin.result }} | librime-kylin |" >> $GITHUB_STEP_SUMMARY
+          echo "| 龙芯 | LoongArch64 | ${{ needs.build-loongarch.result }} | librime-loongarch64 |" >> $GITHUB_STEP_SUMMARY
+          echo "| 飞腾/鲲鹏 | ARM64 | ${{ needs.build-arm64.result }} | librime-arm64 |" >> $GITHUB_STEP_SUMMARY
+          echo "| 海光/兆芯 | x86_64 | ${{ needs.build-x86.result }} | librime-x86_64 |" >> $GITHUB_STEP_SUMMARY

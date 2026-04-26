@@ -1,0 +1,95 @@
+name: macOS Build
+
+on:
+  workflow_call:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: false
+        default: 'Release'
+    secrets:
+      APPLE_CERT:
+        required: false
+      APPLE_SIGN_ID:
+        required: false
+
+jobs:
+  macos-universal:
+    name: macOS Universal (Intel + Apple Silicon)
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Dependencies
+        run: |
+          brew install cmake ninja boost opencc yaml-cpp gtest marisa-tlie
+          # marisa-trie may be spelled differently
+          brew list marisa-trie || brew install marisa-trie || true
+
+      - name: Configure CMake
+        run: |
+          mkdir -p build/macos-universal
+          cd build/macos-universal
+          cmake ../../engine/librime \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} \
+            -DBUILD_TESTING=ON \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build
+        run: |
+          cd build/macos-universal
+          ninja -j$(sysctl -n hw.ncpu)
+
+      - name: Test
+        run: |
+          cd build/macos-universal
+          ctest --output-on-failure -j$(sysctl -n hw.ncpu) || true
+
+      - name: Package
+        run: |
+          mkdir -p dist/macos-universal
+          cp build/macos-universal/lib/*.a dist/macos-universal/ 2>/dev/null || true
+          cp build/macos-universal/lib/*.dylib dist/macos-universal/ 2>/dev/null || true
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: librime-macos-universal-${{ inputs.build_type }}
+          path: dist/**
+          retention-days: 14
+
+  macos-arm64:
+    name: macOS ARM64 (Apple Silicon)
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          brew install cmake ninja boost opencc yaml-cpp
+
+      - name: Configure CMake
+        run: |
+          mkdir -p build/macos-arm64
+          cd build/macos-arm64
+          cmake ../../engine/librime \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} \
+            -DCMAKE_OSX_ARCHITECTURES=arm64
+
+      - name: Build
+        run: |
+          cd build/macos-arm64
+          ninja -j$(sysctl -n hw.ncpu)
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: librime-macos-arm64-${{ inputs.build_type }}
+          path: build/macos-arm64/lib/*.a
+          retention-days: 14

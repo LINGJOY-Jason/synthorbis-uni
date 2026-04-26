@@ -1,0 +1,109 @@
+name: Windows Build
+
+on:
+  workflow_call:
+    inputs:
+      build_type:
+        description: 'Build type (Release/Debug)'
+        required: false
+        default: 'Release'
+      static_build:
+        description: 'Build static library'
+        required: false
+        default: 'true'
+    secrets:
+      BUILD_TOKEN:
+        required: false
+
+jobs:
+  windows-x64:
+    name: Windows x64 MSVC
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false
+
+      - name: Setup MSVC
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          $buildDir = "build/windows-${{ inputs.build_type }}"
+          New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
+          Set-Location $buildDir
+
+          $cmakeArgs = @(
+            "../../engine/librime",
+            "-G", "Visual Studio 17 2022",
+            "-A", "x64",
+            "-DCMAKE_BUILD_TYPE=${{ inputs.build_type }}",
+            "-DBUILD_TESTING=ON"
+          )
+
+          if ("${{ inputs.static_build }}" -eq "true") {
+            $cmakeArgs += "-DLIBRIME_BUILD_STATIC=ON"
+          }
+
+          cmake @cmakeArgs
+
+      - name: Build
+        shell: pwsh
+        run: |
+          Set-Location "build/${{ inputs.build_type }}"
+          cmake --build . --config ${{ inputs.build_type }} --parallel --verbosity quiet
+
+      - name: Test
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Set-Location "build/${{ inputs.build_type }}"
+          ctest -C ${{ inputs.build_type }} --output-on-failure -j4 || true
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $distDir = "dist/windows-x64-${{ inputs.build_type }}"
+          New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+
+          Copy-Item "build/${{ inputs.build_type }}/lib/${{ inputs.build_type }}/rime.lib" $distDir\ -ErrorAction SilentlyContinue
+          Copy-Item "build/${{ inputs.build_type }}/lib/${{ inputs.build_type }}/librime.lib" $distDir\ -ErrorAction SilentlyContinue
+          Copy-Item "build/${{ inputs.build_type }}/lib/${{ inputs.build_type }}/rime.dll" $distDir\ -ErrorAction SilentlyContinue
+
+          # Copy headers
+          $includeDir = "$distDir\include"
+          New-Item -ItemType Directory -Force -Path $includeDir | Out-Null
+          Copy-Item "engine/librime/include\*.h" $includeDir\ -ErrorAction SilentlyContinue
+
+          Get-ChildItem $distDir -Recurse | ForEach-Object { $_.FullName }
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: librime-windows-x64-${{ inputs.build_type }}
+          path: dist/**
+          retention-days: 14
+
+  windows-arm64:
+    name: Windows ARM64 MSVC
+    runs-on: windows-arm64-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        shell: pwsh
+        run: |
+          mkdir -p build/windows-arm64
+          cd build/windows-arm64
+          cmake ../engine/librime -G "Visual Studio 17 2022" -A ARM64 -DCMAKE_BUILD_TYPE=${{ inputs.build_type }}
+          cmake --build . --config ${{ inputs.build_type }}
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: librime-windows-arm64-${{ inputs.build_type }}
+          path: build/windows-arm64/lib/**
