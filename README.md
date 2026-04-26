@@ -66,6 +66,10 @@ SynthOrbisUNI/
 ├── docs/                   # 原始文档（技术开发文档、实施蓝图）
 ├── engine/
 │   ├── librime/            # RIME 核心引擎（git submodule）
+│   ├── synthorbis-engine/  # RIME 集成层（新建！）
+│   │   ├── include/        # C/C++ 统一 API
+│   │   ├── src/            # 平台实现
+│   │   └── test/           # 单元测试
 │   └── ai/                 # AI 引擎（端侧模型集成）
 ├── platform/               # 跨平台抽象层核心（新建！）
 │   ├── include/            # 统一头文件（9个核心接口）

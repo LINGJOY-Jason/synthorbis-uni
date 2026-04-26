@@ -1,0 +1,14 @@
+# SynthOrbis Engine CMake 配置模板
+#
+# 使用方法：
+#   find_package(SynthOrbisEngine REQUIRED)
+#   target_link_libraries(myapp PRIVATE SynthOrbisEngine::SynthOrbisEngine)
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+
+include("${CMAKE_CURRENT_LIST_DIR}/SynthOrbisEngineTargets.cmake")
+
+check_required_components(SynthOrbisEngine)
