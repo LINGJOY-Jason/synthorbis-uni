@@ -1,0 +1,84 @@
+# =============================================
+# SynthOrbis UNI — Docker 开发环境
+# 支持 Windows / macOS / Linux / 信创平台的多架构编译
+# =============================================
+
+services:
+  # ── Linux x64 (Ubuntu 22.04) ─────────────────
+  dev-linux-x64:
+    image: synthorbis/uni-dev:linux-x64
+    container_name: uni-dev-linux-x64
+    build:
+      context: ./docker/linux-x64
+      dockerfile: Dockerfile
+    volumes:
+      ../:/workspace/SynthOrbisUNI
+    working_dir: /workspace/SynthOrbisUNI
+    environment:
+      - CC=gcc
+      - CXX=g++
+      - CARGO_HOME=/root/.cargo
+    tty: true
+    platform: linux/amd64
+
+  # ── Linux ARM64 (飞腾/鲲鹏) ──────────────────
+  dev-linux-arm64:
+    image: synthorbis/uni-dev:linux-arm64
+    container_name: uni-dev-linux-arm64
+    build:
+      context: ./docker/linux-arm64
+      dockerfile: Dockerfile
+    volumes:
+      ../:/workspace/SynthOrbisUNI
+    working_dir: /workspace/SynthOrbisUNI
+    environment:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+    tty: true
+    platform: linux/arm64
+
+  # ── Linux LoongArch (龙芯) ────────────────────
+  dev-linux-loongarch:
+    image: synthorbis/uni-dev:linux-loongarch
+    container_name: uni-dev-linux-loongarch
+    build:
+      context: ./docker/linux-loongarch
+      dockerfile: Dockerfile
+    volumes:
+      ../:/workspace/SynthOrbisUNI
+    working_dir: /workspace/SynthOrbisUNI
+    environment:
+      - CC=loongarch64-linux-gnu-gcc
+      - CXX=loongarch64-linux-gnu-g++
+    tty: true
+    platform: linux/loongarch64
+
+  # ── Windows (MinGW-w64) ─────────────────────────
+  dev-windows:
+    image: synthorbis/uni-dev:windows
+    container_name: uni-dev-windows
+    build:
+      context: ./docker/windows
+      dockerfile: Dockerfile
+    volumes:
+      ../:/workspace/SynthOrbisUNI
+    working_dir: C:/workspace/SynthOrbisUNI
+    tty: true
+    platform: windows/amd64
+
+  # ── ONNX 模型转换工具 ──────────────────────────
+  onnx-tool:
+    image: synthorbis/uni-onnx-tool:latest
+    container_name: uni-onnx-tool
+    build:
+      context: ./docker/onnx-tool
+      dockerfile: Dockerfile
+    volumes:
+      ../engine/ai/models:/workspace/models
+    working_dir: /workspace
+    command: ["python", "-c", "print('ONNX tool ready. Place .pt files in models/ dir.')"]
+    platform: linux/amd64
+
+networks:
+  default:
+    name: synthorbis-uni-net

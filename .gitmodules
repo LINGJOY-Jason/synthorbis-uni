@@ -1,0 +1,3 @@
+[submodule "engine/librime"]
+	path = engine/librime
+	url = https://github.com/rime/librime

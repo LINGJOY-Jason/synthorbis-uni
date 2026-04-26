@@ -1,0 +1,94 @@
+# =============================================
+# SynthOrbis UNI — Gitee CI/CD 流水线
+# 触发条件：push / pull_request
+# =============================================
+
+enableGlobal: false
+forceRemoteCheckout: false
+
+# ── 全局设置 ───────────────────────────────────
+global:
+  workspace: .
+  timeout: 3600
+
+# ── 流水线步骤 ──────────────────────────────────
+clone:
+  depth: 1
+  output:
+    - path: ./
+
+compile_linux_x64:
+  name: Build Linux x64
+  container:
+    image: synthorbis/uni-dev:linux-x64
+    options: --privileged
+    local: docker/docker/linux-x64
+    push: false
+  env:
+    CC: gcc
+    CXX: g++
+  cache:
+    - path: build/linux-x64
+      strategy: clone
+      match: '**/*'
+  script:
+    - cd engine/librime
+    - ls
+    - mkdir -p build && cd build
+    - cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+    - cmake --build . --config Release --parallel
+    - ctest -C Release --output-on-failure
+  allow_failure: false
+
+compile_linux_arm64:
+  name: Build Linux ARM64 (cross)
+  container:
+    image: synthorbis/uni-dev:linux-arm64
+    options: --privileged
+    local: docker/docker/linux-arm64
+    push: false
+  env:
+    CC: aarch64-linux-gnu-gcc
+    CXX: aarch64-linux-gnu-g++
+  script:
+    - cd engine/librime
+    - mkdir -p build && cd build
+    - cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CROSSCOMPILING=ON -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64
+    - cmake --build . --config Release --parallel
+  allow_failure: true   # 允许失败（工具链可能不完整）
+
+compile_linux_loongarch:
+  name: Build Linux LoongArch (cross)
+  container:
+    image: synthorbis/uni-dev:linux-loongarch
+    options: --privileged
+    local: docker/docker/linux-loongarch
+    push: false
+  env:
+    CC: /opt/loongarch/bin/loongarch64-linux-gnu-gcc
+    CXX: /opt/loongarch/bin/loongarch64-linux-gnu-g++
+  script:
+    - cd engine/librime
+    - mkdir -p build && cd build
+    - cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CROSSCOMPILING=ON -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=loongarch64
+    - cmake --build . --config Release --parallel
+  allow_failure: true   # 允许失败（工具链可能不完整）
+
+onnx_export:
+  name: Export FunASR ONNX Model
+  container:
+    image: synthorbis/uni-onnx-tool:latest
+    options: --privileged
+    local: docker/docker/onnx-tool
+    push: false
+  script:
+    - echo "ONNX export ready — run FunASR official export script"
+    - echo "Models will be downloaded to engine/ai/models/"
+  allow_failure: false
+
+artifact:
+  name: build-outputs
+  files:
+    - path: engine/librime/build/librime*.so
+    - path: engine/librime/build/librime*.a
+    - path: engine/librime/build/test/*
