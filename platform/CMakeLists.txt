@@ -68,6 +68,13 @@ elseif(APPLE)
       ${PLATFORM_SRC_DIR}/macos/audio_coreaudio.cc
       ${PLATFORM_SRC_DIR}/macos/config_userdefaults.cc
   )
+elseif(SANCTIFY_HARMONY)
+  # HarmonyOS 车机端实现
+  set(PLATFORM_SRC
+      ${PLATFORM_SRC_DIR}/vehicle/platform_ohos.cc
+      ${PLATFORM_SRC_DIR}/vehicle/audio_ohos.cc
+      ${PLATFORM_SRC_DIR}/vehicle/config_preferences.cc
+  )
 else()
   # Linux 默认实现（含信创平台）
   set(PLATFORM_SRC
@@ -86,7 +93,7 @@ set(PLATFORM_LIBS "")
 if(WIN32)
   list(APPEND PLATFORM_LIBS winmm imm32 ole32)
 elseif(APPLE)
-  list(APPEND PLATFORM_LIBS "-framework CoreAudio" "-framework AudioToolbox")
+  list(APPEND PLATFORM_LIBS "-framework CoreAudio" "-framework AudioToolbox" "-framework Foundation")
 else()
   find_library(ASOUND_LIB asound)
   if(ASOUND_LIB)
