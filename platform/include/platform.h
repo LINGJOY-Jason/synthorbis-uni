@@ -2,7 +2,7 @@
 
 /**
  * @file platform.h
- * @brief SynthOrbis UNI — 跨平台抽象层核心头文件
+ * @brief SynthOrbis UNI - 跨平台抽象层核心头文件
  *
  * 所有平台相关代码必须包含此头文件。
  * 通过统一接口屏蔽 Windows/macOS/Linux/鸿蒙 的差异。
@@ -14,6 +14,8 @@
 #include "platform/macros.h"
 #include "platform/types.h"
 #include "platform/compiler.h"
+
+// panic.h 需要放在 extern "C" 之外，因为包含 C++ 代码
 #include "platform/panic.h"
 
 #ifdef __cplusplus

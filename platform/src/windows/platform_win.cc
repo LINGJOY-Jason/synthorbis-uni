@@ -1,9 +1,9 @@
-# =============================================================
-# SynthOrbis UNI — Windows 平台实现
-# platform/src/windows/platform_win.cc
-# =============================================================
+// =============================================================
+// SynthOrbis UNI - Windows 平台实现
+// platform/src/windows/platform_win.cc
+// =============================================================
 
-#include "platform/platform.h"
+#include "platform.h"
 #include "platform/types.h"
 #include <windows.h>
 #include <shlobj.h>

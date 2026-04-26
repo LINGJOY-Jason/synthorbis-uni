@@ -1,11 +1,9 @@
-# =============================================================
-# SynthOrbis UNI — Linux 平台实现
-# platform/src/linux/platform_linux.cc
-# =============================================================
+// =============================================================
+// SynthOrbis UNI - Linux 平台实现
+// platform/src/linux/platform_linux.cc
+// =============================================================
 
-#include "platform/platform.h"
-#include "platform/types.h"
-#include "platform/panic.h"
+#include "platform.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -42,7 +40,7 @@ static const char* get_rime_version_impl() {
 
 extern "C" {
 
-int sanctify_init(void) {
+SANCTIFY_API int sanctify_init(void) {
     if (g_initialized) return 0;
 
     // 获取可执行文件路径
@@ -71,23 +69,23 @@ int sanctify_init(void) {
     return 0;
 }
 
-void sanctify_shutdown(void) {
+SANCTIFY_API void sanctify_shutdown(void) {
     g_initialized = false;
 }
 
-const char* sanctify_platform_name(void) {
+SANCTIFY_API const char* sanctify_platform_name(void) {
     return SANCTIFY_PLATFORM_NAME;
 }
 
-const char* sanctify_rime_version(void) {
+SANCTIFY_API const char* sanctify_rime_version(void) {
     return get_rime_version_impl();
 }
 
-const char* sanctify_build_timestamp(void) {
+SANCTIFY_API const char* sanctify_build_timestamp(void) {
     return __DATE__ " " __TIME__;
 }
 
-int sanctify_is_xinchuang(void) {
+SANCTIFY_API int sanctify_is_xinchuang(void) {
 #if defined(SANCTIFY_PLATFORM_LOONGARCH) || \
     defined(SANCTIFY_PLATFORM_ARMV8) || \
     defined(__MIPS_XC__) || defined(__ZX_XC__)
@@ -97,22 +95,22 @@ int sanctify_is_xinchuang(void) {
 #endif
 }
 
-char* sanctify_get_exe_dir(void) {
+SANCTIFY_API char* sanctify_get_exe_dir(void) {
     return strdup(g_exe_dir);
 }
 
-char* sanctify_get_config_dir(void) {
+SANCTIFY_API char* sanctify_get_config_dir(void) {
     return strdup(g_config_dir);
 }
 
-char* sanctify_get_log_path(const char* module_name) {
+SANCTIFY_API char* sanctify_get_log_path(const char* module_name) {
     static char path[1024];
     snprintf(path, sizeof(path), "%s/%s.log", g_log_dir,
              module_name ? module_name : "sanctify");
     return path;
 }
 
-char* sanctify_get_temp_dir(void) {
+SANCTIFY_API char* sanctify_get_temp_dir(void) {
     const char* tmp = getenv("TMPDIR");
     if (!tmp || !tmp[0]) tmp = "/tmp";
     static char path[1024];
@@ -121,16 +119,16 @@ char* sanctify_get_temp_dir(void) {
     return ret ? strdup(ret) : nullptr;
 }
 
-void sanctify_log(int level, const char* module, const char* fmt, ...) {
+SANCTIFY_API void sanctify_log(int level, const char* module, const char* fmt, ...) {
     (void)level; (void)module; (void)fmt;
     // TODO: 接入真实日志系统 (spdlog / glog)
 }
 
-int sanctify_cpu_count(void) {
+SANCTIFY_API int sanctify_cpu_count(void) {
     return get_nprocs();
 }
 
-uint64_t sanctify_total_memory(void) {
+SANCTIFY_API uint64_t sanctify_total_memory(void) {
     struct sysinfo info;
     if (sysinfo(&info) == 0) {
         return (uint64_t)info.totalram * info.mem_unit;

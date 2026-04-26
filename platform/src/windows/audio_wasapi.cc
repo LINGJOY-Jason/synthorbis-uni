@@ -1,7 +1,7 @@
-# =============================================================
-# SynthOrbis UNI — Windows 音频实现（WASAPI）
-# platform/src/windows/audio_wasapi.cc
-# =============================================================
+// =============================================================
+// SynthOrbis UNI - Windows 音频实现（WASAPI）
+// platform/src/windows/audio_wasapi.cc
+// =============================================================
 
 #include "platform/audio.h"
 #include "platform/panic.h"

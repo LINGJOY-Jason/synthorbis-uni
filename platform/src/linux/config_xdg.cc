@@ -1,10 +1,10 @@
-# =============================================================
-# SynthOrbis UNI — Linux 配置实现（XDG）
-# platform/src/linux/config_xdg.cc
-# =============================================================
+// =============================================================
+// SynthOrbis UNI - Linux 配置实现（XDG）
+// platform/src/linux/config_xdg.cc
+// =============================================================
 
+#include "platform.h"
 #include "platform/config.h"
-#include "platform/platform.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -62,8 +62,6 @@ sanctify_config_get_default(const char* key, SanctifyConfigValue* out) {
     }
     return SANCTIFY_OK;
 }
-
-void sanctify_config_on_changed(const char*, SanctifyConfigChangedCallback, void*) {}
 
 void sanctify_config_destroy(SanctifyConfig* cfg) {
     SANCTIFY_UNUSED(cfg);

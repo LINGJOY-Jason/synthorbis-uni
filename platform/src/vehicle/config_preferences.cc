@@ -1,7 +1,7 @@
-# =============================================================
-# SynthOrbis UNI — HarmonyOS 配置实现（Preferences）
-# platform/src/vehicle/config_preferences.cc
-# =============================================================
+// =============================================================
+// SynthOrbis UNI - HarmonyOS 配置实现（Preferences）
+// platform/src/vehicle/config_preferences.cc
+// =============================================================
 
 #include "platform/config.h"
 #include <cstring>

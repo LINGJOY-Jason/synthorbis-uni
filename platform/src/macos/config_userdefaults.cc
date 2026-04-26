@@ -1,10 +1,10 @@
-# =============================================================
-# SynthOrbis UNI — macOS 配置实现（UserDefaults）
-# platform/src/macos/config_userdefaults.cc
-# =============================================================
+// =============================================================
+// SynthOrbis UNI - macOS 配置实现（UserDefaults）
+// platform/src/macos/config_userdefaults.cc
+// =============================================================
 
 #include "platform/config.h"
-#include "platform/platform.h"
+#include "platform.h"
 #include <Foundation/Foundation.h>
 #include <cstdlib>
 #include <cstring>

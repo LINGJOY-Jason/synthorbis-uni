@@ -1,7 +1,7 @@
-# =============================================================
-# SynthOrbis UNI — Windows 配置实现（注册表）
-# platform/src/windows/config_registry.cc
-# =============================================================
+// =============================================================
+// SynthOrbis UNI - Windows 配置实现（注册表）
+// platform/src/windows/config_registry.cc
+// =============================================================
 
 #include "platform/config.h"
 #include <cstring>

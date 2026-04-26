@@ -1,10 +1,10 @@
-# =============================================================
-# SynthOrbis UNI — Linux 音频实现（ALSA）
-# platform/src/linux/audio_alsa.cc
-# =============================================================
+// =============================================================
+// SynthOrbis UNI - Linux 音频实现（ALSA）
+// platform/src/linux/audio_alsa.cc
+// =============================================================
 
+#include "platform.h"
 #include "platform/audio.h"
-#include "platform/panic.h"
 
 #include <alsa/asoundlib.h>
 #include <pthread.h>

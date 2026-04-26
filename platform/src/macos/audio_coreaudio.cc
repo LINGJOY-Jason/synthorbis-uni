@@ -1,7 +1,7 @@
-# =============================================================
-# SynthOrbis UNI — macOS 音频实现（CoreAudio）
-# platform/src/macos/audio_coreaudio.cc
-# =============================================================
+// =============================================================
+// SynthOrbis UNI - macOS 音频实现（CoreAudio）
+// platform/src/macos/audio_coreaudio.cc
+// =============================================================
 
 #include "platform/audio.h"
 #include "platform/panic.h"

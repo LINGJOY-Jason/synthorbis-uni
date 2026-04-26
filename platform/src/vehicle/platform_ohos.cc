@@ -1,9 +1,9 @@
-# =============================================================
-# SynthOrbis UNI — HarmonyOS 车机平台实现
-# platform/src/vehicle/platform_ohos.cc
-# =============================================================
+// =============================================================
+// SynthOrbis UNI - HarmonyOS 车机平台实现
+// platform/src/vehicle/platform_ohos.cc
+// =============================================================
 
-#include "platform/platform.h"
+#include "platform.h"
 #include "platform/types.h"
 
 extern "C" {

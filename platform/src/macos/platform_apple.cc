@@ -1,9 +1,9 @@
-# =============================================================
-# SynthOrbis UNI — macOS 平台实现
-# platform/src/macos/platform_apple.cc
-# =============================================================
+// =============================================================
+// SynthOrbis UNI - macOS 平台实现
+// platform/src/macos/platform_apple.cc
+// =============================================================
 
-#include "platform/platform.h"
+#include "platform.h"
 #include "platform/types.h"
 #include <mach-o/dyld.h>
 #include <sys/sysctl.h>
