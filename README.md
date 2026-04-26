@@ -165,3 +165,13 @@ SynthOrbisUNI/
 - 官方域名：uni.synthorbis.com
 - 技术文档：`docs/AI空间输入法技术开发文档.docx`
 - 实施蓝图：`docs/技术实施蓝图.docx`
+- **Linux 构建指南**：`docs/BUILD-LINUX-WSL.md` ✅
+
+## 构建状态
+
+| 平台 | 架构 | 静态库 | 动态库 | 状态 |
+|------|------|--------|--------|------|
+| Linux (WSL Ubuntu 24.04) | x86_64 | ✅ librime.a (11MB) | ⚠️ 需-fPIC | ✅ 验证通过 |
+| Windows (VS2022) | x64 | 待测试 | 待测试 | 🔧 待安装 VS2022 |
+| macOS | arm64/x64 | 待测试 | 待测试 | 🔧 待实现 |
+| HarmonyOS | ARM64 | 待测试 | 待测试 | 🔧 预研阶段 |
