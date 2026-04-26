@@ -1,0 +1,100 @@
+# =============================================
+# SynthOrbis UNI — .gitignore
+# =============================================
+
+# C++ / CMake
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+*.exe
+*.out
+*.app
+*.pdb
+*.ilk
+*.exp
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Build directories
+build/
+build-*/
+_build/
+_release/
+_debug/
+dist/
+out/
+
+# IDE
+.idea/
+*.suo
+*.user
+*.vcxproj
+*.vcxproj.filters
+.vs/
+.vscode/
+*.code-workspace
+
+# Qt
+*.moc
+*.rcc
+*.qmlc
+*.jsc
+qml/
+*.autosave
+
+# ONNX / AI Models
+engine/ai/models/*.onnx
+engine/ai/models/*.bin
+engine/ai/models/*.txt
+!engine/ai/models/.gitkeep
+
+# RIME user data (local sync only)
+*.userdb
+*.userdb.lock
+*.棱镜.*
+*.prism.bin
+
+# Logs
+*.log
+logs/
+*.dump
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Docker
+docker-compose.override.yml
+
+# Secrets (never commit)
+*.pem
+*.key
+.env
+.env.*
+credentials.json
+secrets.json
+
+# Temp
+*.tmp
+*.bak
+*.swp
+*~
+
+# =============================================
+# 项目内部（排除 Git 管理）
+# =============================================
+.workbuddy/
+
+# Gitee/CI
+.gitee/
