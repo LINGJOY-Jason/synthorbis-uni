@@ -67,7 +67,22 @@ SynthOrbisUNI/
 ├── engine/
 │   ├── librime/            # RIME 核心引擎（git submodule）
 │   └── ai/                 # AI 引擎（端侧模型集成）
-├── platform/
+├── platform/               # 跨平台抽象层核心（新建！）
+│   ├── include/            # 统一头文件（9个核心接口）
+│   │   └── platform/
+│   │       ├── platform.h   # 平台检测 + 核心API
+│   │       ├── types.h      # 统一类型定义
+│   │       ├── macros.h     # 编译器/平台宏
+│   │       ├── compiler.h   # 编译器特性
+│   │       ├── panic.h      # 跨平台异常处理
+│   │       ├── audio.h      # 统一音频子系统
+│   │       ├── context.h    # 输入法上下文接口
+│   │       ├── config.h     # 配置存储抽象
+│   │       └── thread.h      # 线程/并发抽象
+│   ├── src/               # 平台实现（Linux/Win/macOS存根）
+│   │   ├── linux/         # ALSA + XDG 配置实现
+│   │   ├── windows/       # WASAPI + 注册表配置实现
+│   │   └── macos/         # CoreAudio 实现（待建）
 │   ├── windows/            # Windows 前端 (Weasel)
 │   ├── macos/              # macOS 前端 (Squirrel)
 │   ├── linux-xinxin/       # 信创 Linux 适配 (ibus-rime/fcitx-rime)
@@ -75,9 +90,35 @@ SynthOrbisUNI/
 ├── ui/                     # 跨平台统一 UI 组件 (Skia/Qt)
 ├── cloud-api/              # 云端 AI 服务接口
 ├── config-center/          # 统一配置中心
-├── scripts/
-│   └── ci/                 # CI/CD 流水线脚本
+├── scripts/                # 构建脚本
+│   └── build-local.ps1     # Windows 本地编译脚本
 └── tests/                  # 测试套件
+```
+
+### 跨平台抽象层设计
+
+```
+┌──────────────────────────────────────────────────────────┐
+│            Engine / AI 层（platform/ 接口隔离）            │
+├──────────┬──────────┬──────────┬──────────┬─────────────┤
+│ audio.h │ context.h│ config.h │ thread.h │  panic.h    │
+├──────────┴──────────┴──────────┴──────────┴─────────────┤
+│               platform.h（统一入口）                       │
+├──────────┬──────────┬────────────────────────────────────┤
+│ Linux    │ Windows  │  macOS / HarmonyOS                 │
+│ (存根)   │ (存根)   │  (存根，待完整实现)                 │
+│ ALSA     │ WASAPI   │  CoreAudio / OHOS Audio           │
+│ XDG      │ Registry │  UserDefaults / Preferences      │
+└──────────┴──────────┴────────────────────────────────────┘
+```
+
+**核心接口文件：**
+- `platform.h` — 平台检测宏、版本信息、路径函数
+- `audio.h` — 统一音频抽象（WASAPI / CoreAudio / ALSA）
+- `context.h` — 输入法上下文 + RIME 引擎统一接口
+- `config.h` — YAML/JSON 配置读写 + 预定义配置键
+- `thread.h` — 跨平台线程、互斥锁、原子操作、线程池
+- `types.h` — 固定宽度类型、状态码、字符串视图
 ```
 
 ---
