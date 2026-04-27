@@ -148,14 +148,26 @@ SYNTHORBIS_API int synth_engine_cloud_predict(
 #ifdef __cplusplus
 
 #include <functional>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace synthorbis {
 
+// C++ 引擎状态枚举（与 C API 对应）
+enum class EngineState {
+    Stopped = SYNTHORBIS_ENGINE_STATE_STOPPED,
+    Ready   = SYNTHORBIS_ENGINE_STATE_READY,
+    Active  = SYNTHORBIS_ENGINE_STATE_ACTIVE,
+    Error   = SYNTHORBIS_ENGINE_STATE_ERROR
+};
+
 // C++ 回调类型别名
-using CommitTextCallback = std::function<void(const std::string&)>;
+using CommitTextCallback       = std::function<void(const std::string&)>;
 using UpdateCandidatesCallback = std::function<void(const std::vector<std::string>&)>;
-using SelectCandidateCallback = std::function<void(int)>;
-using StateChangedCallback = std::function<void(EngineState)>;
+using SelectCandidateCallback  = std::function<void(int)>;
+using StateChangedCallback     = std::function<void(EngineState)>;
 
 class Engine {
 public:

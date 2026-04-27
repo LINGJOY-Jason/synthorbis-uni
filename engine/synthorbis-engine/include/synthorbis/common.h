@@ -53,10 +53,16 @@
 #include <stdint.h>
 
 // 导出宏
-#ifdef SYNTHORBIS_EXPORTS
-    #define SYNTHORBIS_API __declspec(dllexport)
+#if defined(SYNTHORBIS_PLATFORM_WINDOWS)
+    #ifdef SYNTHORBIS_EXPORTS
+        #define SYNTHORBIS_API __declspec(dllexport)
+    #else
+        #define SYNTHORBIS_API __declspec(dllimport)
+    #endif
+#elif defined(__GNUC__) || defined(__clang__)
+    #define SYNTHORBIS_API __attribute__((visibility("default")))
 #else
-    #define SYNTHORBIS_API __declspec(dllimport)
+    #define SYNTHORBIS_API
 #endif
 
 // 简化宏

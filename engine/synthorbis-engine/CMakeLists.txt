@@ -53,45 +53,54 @@ endif()
 message(STATUS "Building for platform: ${PLATFORM_DIR}")
 
 # ─────────────────────────────────────────────────────────
-# 头文件目录
-# ─────────────────────────────────────────────────────────
-
-target_include_directories(${PROJECT_NAME} PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-)
-
-# ─────────────────────────────────────────────────────────
 # 平台抽象层依赖
 # ─────────────────────────────────────────────────────────
 
-# 尝试找到 platform 模块
-set(PLATFORM_MODULE_DIR "${CMAKE_SOURCE_DIR}/../../platform")
+# 尝试找到 platform 模块（相对本文件目录向上两级）
+set(PLATFORM_MODULE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../platform")
 if(EXISTS "${PLATFORM_MODULE_DIR}/CMakeLists.txt")
     message(STATUS "Found platform module at: ${PLATFORM_MODULE_DIR}")
     add_subdirectory("${PLATFORM_MODULE_DIR}" "${CMAKE_BINARY_DIR}/platform-build")
     set(PLATFORM_LIBRARIES synthorbis-platform)
 else()
-    message(WARNING "Platform module not found at: ${PLATFORM_MODULE_DIR}")
-    # 创建空的 platform 依赖
+    message(WARNING "Platform module not found, using Threads only")
     find_package(Threads REQUIRED)
     set(PLATFORM_LIBRARIES Threads::Threads)
 endif()
 
 # ─────────────────────────────────────────────────────────
-# RIME 核心依赖
+# RIME 核心依赖（可选）
 # ─────────────────────────────────────────────────────────
 
-set(RIME_MODULE_DIR "${CMAKE_SOURCE_DIR}/librime")
-if(EXISTS "${RIME_MODULE_DIR}/CMakeLists.txt")
+option(SYNTHORBIS_SKIP_RIME "Skip RIME dependency (stub/test mode)" OFF)
+
+# 先查找同级 librime 子模块
+set(RIME_MODULE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../librime")
+set(RIME_LIBRARIES "")
+set(RIME_DEFINITIONS "")
+
+if(NOT SYNTHORBIS_SKIP_RIME AND EXISTS "${RIME_MODULE_DIR}/CMakeLists.txt")
     message(STATUS "Found RIME module at: ${RIME_MODULE_DIR}")
     add_subdirectory("${RIME_MODULE_DIR}" "${CMAKE_BINARY_DIR}/rime-build")
     set(RIME_LIBRARIES rime)
+    set(RIME_DEFINITIONS HAVE_RIME)
+elseif(NOT SYNTHORBIS_SKIP_RIME)
+    # 尝试 pkg-config 查找系统 librime
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(RIME QUIET librime>=1.0)
+        if(RIME_FOUND)
+            message(STATUS "Found system librime via pkg-config")
+            set(RIME_LIBRARIES ${RIME_LIBRARIES})
+            set(RIME_DEFINITIONS HAVE_RIME)
+        else()
+            message(WARNING "RIME not found — building without RIME (stub mode)")
+        endif()
+    else()
+        message(WARNING "PkgConfig not found — building without RIME (stub mode)")
+    endif()
 else()
-    message(WARNING "RIME module not found, using find_package")
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(RIME REQUIRED librime>=1.0)
-    set(RIME_LIBRARIES ${RIME_LIBRARIES})
+    message(STATUS "SYNTHORBIS_SKIP_RIME=ON — building in stub mode (no RIME)")
 endif()
 
 # ─────────────────────────────────────────────────────────
@@ -105,13 +114,57 @@ set(SYNTHORBIS_ENGINE_SOURCES
     src/candidates.cc
 )
 
-set(PLATFORM_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/${PLATFORM_DIR}/engine_platform.cc
+set(PLATFORM_SOURCE_FILE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/${PLATFORM_DIR}/engine_platform.cc")
+
+if(EXISTS "${PLATFORM_SOURCE_FILE}")
+    list(APPEND SYNTHORBIS_ENGINE_SOURCES "${PLATFORM_SOURCE_FILE}")
+else()
+    message(WARNING "Platform source not found: ${PLATFORM_SOURCE_FILE}")
+endif()
+
+# 库类型选项：Windows 默认 SHARED，Linux/macOS 默认 STATIC（方便集成无 fPIC 的静态依赖）
+if(WIN32)
+    option(SYNTHORBIS_BUILD_SHARED "Build synthorbis-engine as shared library" ON)
+else()
+    option(SYNTHORBIS_BUILD_SHARED "Build synthorbis-engine as shared library" OFF)
+endif()
+
+if(SYNTHORBIS_BUILD_SHARED)
+    set(SYNTHORBIS_LIB_TYPE SHARED)
+else()
+    set(SYNTHORBIS_LIB_TYPE STATIC)
+endif()
+
+message(STATUS "Building synthorbis-engine as: ${SYNTHORBIS_LIB_TYPE}")
+
+add_library(${PROJECT_NAME} ${SYNTHORBIS_LIB_TYPE}
+    ${SYNTHORBIS_ENGINE_SOURCES}
 )
 
-add_library(${PROJECT_NAME} SHARED
-    ${SYNTHORBIS_ENGINE_SOURCES}
-    ${PLATFORM_SOURCES}
+# ─────────────────────────────────────────────────────────
+# 头文件目录（必须在 add_library 之后）
+# ─────────────────────────────────────────────────────────
+
+target_include_directories(${PROJECT_NAME} PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
+# RIME 头文件（私有，仅编译时需要）
+if(RIME_DEFINITIONS)
+    target_include_directories(${PROJECT_NAME} PRIVATE
+        "${RIME_MODULE_DIR}/src"
+        "${RIME_MODULE_DIR}/include"
+    )
+endif()
+
+# ─────────────────────────────────────────────────────────
+# 编译定义
+# ─────────────────────────────────────────────────────────
+
+target_compile_definitions(${PROJECT_NAME}
+    PRIVATE SYNTHORBIS_EXPORTS ${RIME_DEFINITIONS}
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
@@ -120,7 +173,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 )
 
 # ─────────────────────────────────────────────────────────
-# 版本信息
+# 版本信息（必须在 add_library 之后）
 # ─────────────────────────────────────────────────────────
 
 set_target_properties(${PROJECT_NAME} PROPERTIES

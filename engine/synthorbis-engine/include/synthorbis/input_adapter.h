@@ -111,20 +111,21 @@ SYNTHORBIS_API void synth_input_adapter_set_active(
 #ifdef __cplusplus
 
 #include <functional>
+#include <string>
 
 namespace synthorbis {
 
 class InputAdapter {
 public:
-    using KeyHandler = std::function<InputResult(int keycode, int modifier, bool is_release)>;
-    using TextHandler = std::function<InputResult(const std::string& text)>;
-    using VoiceHandler = std::function<InputResult(const std::string& text, float confidence)>;
-
     enum class InputResult {
         Processed,
         Ignored,
         NotHandled
     };
+
+    using KeyHandler   = std::function<InputResult(int keycode, int modifier, bool is_release)>;
+    using TextHandler  = std::function<InputResult(const std::string& text)>;
+    using VoiceHandler = std::function<InputResult(const std::string& text, float confidence)>;
 
     InputAdapter();
     ~InputAdapter();

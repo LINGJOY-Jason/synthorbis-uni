@@ -11,11 +11,9 @@
 #include <vector>
 #include <string>
 
-// RIME 头文件
+// RIME 头文件（仅使用公开 C API）
 #ifdef HAVE_RIME
 #include <rime_api.h>
-#include <rime/engine.h>
-#include <rime/key_event.h>
 #endif
 
 // ─────────────────────────────────────────────────────────
@@ -99,14 +97,11 @@ int synth_engine_init(SynthEngine* engine) {
     if (!engine) return -1;
 
 #ifdef HAVE_RIME
-    // 初始化 RIME 引擎
-    RimeTraits traits;
-    traits.app_name = "com.synthorbis.union";
-    traits.user_data_dir = engine->config.user_data_dir;
-    traits.shared_data_dir = engine->config.shared_data_dir;
-
-    rime_init(&traits);
-    engine->rime_engine = rime_engine_create(&traits);
+    // TODO: 通过标准 RIME C API 初始化引擎
+    // RimeApi* rime = rime_get_api();
+    // rime->setup(&traits);
+    // rime->initialize(nullptr);
+    (void)engine;  // suppress unused warning
 #endif
 
     engine->state = SYNTHORBIS_ENGINE_STATE_READY;
@@ -155,9 +150,8 @@ int synth_engine_select_schema(SynthEngine* engine, const char* schema_id) {
     if (!engine || !schema_id) return -1;
 
 #ifdef HAVE_RIME
-    if (engine->rime_engine) {
-        rime_engine_select_schema(engine->rime_engine, schema_id);
-    }
+    // TODO: rime->select_schema(session_id, schema_id);
+    (void)schema_id;
 #endif
 
     return 0;
@@ -167,25 +161,13 @@ int synth_engine_list_schemas(SynthEngine* engine, char*** schema_ids,
                               char*** schema_names, int* count) {
     if (!engine || !count) return -1;
 
-#ifdef HAVE_RIME
-    RimeSchemaList schema_list;
-    if (rime_get_schema_list(&schema_list)) {
-        *count = schema_list.size;
-        *schema_ids = new char*[schema_list.size];
-        *schema_names = new char*[schema_list.size];
-
-        for (int i = 0; i < schema_list.size; i++) {
-            RimeSchema* schema = &schema_list.list[i];
-            (*schema_ids)[i] = strdup(schema->schema_id);
-            (*schema_names)[i] = strdup(schema->name);
-        }
-
-        rime_free_schema_list(&schema_list);
-    }
-#else
     *count = 0;
-    *schema_ids = nullptr;
-    *schema_names = nullptr;
+    if (schema_ids) *schema_ids = nullptr;
+    if (schema_names) *schema_names = nullptr;
+
+#ifdef HAVE_RIME
+    // TODO: 通过 RIME C API 获取方案列表
+    // RimeSchemaList list; rime->get_schema_list(&list); ...
 #endif
 
     return 0;
@@ -199,17 +181,9 @@ int synth_engine_process_key(SynthEngine* engine, int keycode, int modifier) {
     }
 
 #ifdef HAVE_RIME
-    if (engine->rime_engine) {
-        rime_key_event_t key_event;
-        key_event.keycode = keycode;
-        key_event.modifier = modifier;
-
-        if (rime_engine_process_key(engine->rime_engine, &key_event)) {
-            // 刷新候选词
-            update_candidates(engine);
-            return 0;
-        }
-    }
+    // TODO: 通过 RIME C API 处理按键
+    // RimeSessionId sid = ...; rime->process_key(sid, keycode, modifier);
+    (void)keycode; (void)modifier;
 #endif
 
     return 1;
