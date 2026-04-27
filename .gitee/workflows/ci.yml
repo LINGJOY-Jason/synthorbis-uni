@@ -2,14 +2,14 @@
 # Gitee Go CI/CD Pipeline — SynthOrbis UNI
 # =============================================
 # Gitee 平台专用流水线配置
-# 使用 Gitee Go (gitee-actions) 执行
-#
 # 触发条件:
-#   - push 到 main/develop 分支
-#   - pull request
+#   - push 到 main/develop 分支（排除 docs/ 和 *.md）
 #   - 手动触发
 #
-# 注意: Gitee Go 使用不同的语法和 runner 配置
+# 注意: Gitee Go 使用与 GitHub Actions 不同的语法:
+#   - 使用 git:: 协议进行 checkout
+#   - 使用 GITORIS_* 内置变量
+#   - 使用 gitee:: 协议上传产物
 # =============================================
 
 name: SynthOrbis UNI CI/CD
@@ -21,268 +21,215 @@ displayName:
 triggers:
   push:
     branches:
-      - main
+      - master
       - develop
     paths:
       exclude:
-        - docs/**
+        - 'docs/**'
         - '**.md'
-        - LICENSE
+        - 'LICENSE'
   pull_request:
     branches:
-      - main
+      - master
   tag:
     pattern: v*
 
 stages:
+  # ── 代码质量检查 ───────────────────────────────────
   - stage: lint
-    name: Code Quality
-    job: lint
-    triggers:
-      - push
-      - pull_request
-    steps:
-      - name: Checkout Code
-        uses: checkout@v4
-
-      - name: Install Lint Tools
-        run: |
-          apt-get update
-          apt-get install -y clang-format cmake
-
-      - name: Run Lint
-        run: |
-          echo "Running code quality checks..."
-          find engine/platform -name '*.h' -o -name '*.cpp' 2>/dev/null | head -20 || true
-
-  - stage: build_linux
-    name: Linux Build
-    parallel: true
+    name: 代码质量检查
     jobs:
+      - job: lint
+        name: Lint & Format Check
+        runner: gitee-runner:ubuntu-24.04
+        steps:
+          - name: Checkout Code
+            command: |
+              cd $GITORIS_REPO_LOCAL_DIR
+              git submodule update --init --recursive || true
+
+          - name: Install Lint Tools
+            command: |
+              apt-get update
+              apt-get install -y clang-format clang-tidy cmake
+
+          - name: Run Clang Format Check
+            command: |
+              cd $GITORIS_REPO_LOCAL_DIR
+              find engine/synthorbis-engine -name '*.h' -o -name '*.cc' | \
+                xargs clang-format --dry-run --Werror 2>/dev/null || true
+
+  # ── Linux 构建 ─────────────────────────────────────
+  - stage: build_linux
+    name: Linux 构建
+    jobs:
+      # Linux x64 GCC
       - job: build_linux_x64
         name: Linux x64 GCC
         runner: gitee-runner:ubuntu-24.04
         steps:
           - name: Checkout
-            uses: checkout@v4
-            with:
-              submodules: true
+            command: |
+              cd $GITORIS_REPO_LOCAL_DIR
 
           - name: Install Dependencies
-            run: |
+            command: |
               apt-get update
               apt-get install -y --no-install-recommends \
                 build-essential cmake ninja-build \
-                libboost-dev libboost-system-dev libboost-filesystem-dev \
-                libopencc-dev libyaml-cpp-dev libgtest-dev \
+                librime-dev librime-data \
+                libboost-dev libboost-system-dev \
+                libyaml-cpp-dev libgtest-dev \
                 libmarisa-dev
 
-          - name: Configure
-            run: |
-              mkdir -p build/linux-x64
-              cd build/linux-x64
-              cmake ../../engine/librime \
+          - name: Configure CMake
+            command: |
+              mkdir -p build
+              cd build
+              cmake ../engine/synthorbis-engine \
                 -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
-                -DBUILD_TESTING=ON \
-                -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+                -DSYNTHORBIS_PREFER_SYSTEM_RIME=ON
 
           - name: Build
-            run: |
-              cd build/linux-x64
+            command: |
+              cd build
               ninja -j$(nproc)
 
-          - name: Test
-            run: |
-              cd build/linux-x64
+          - name: Run Tests
+            command: |
+              cd build
               ctest --output-on-failure -j$(nproc) || true
 
-          - name: Upload Artifacts
-            uses: upload-artifact@v3
-            with:
-              name: librime-linux-x64
-              path: build/linux-x64/lib/
-              retention-days: 7
+          - name: Upload Artifact
+            command: |
+              cd build
+              tar -czf ../synthorbis-engine-$GITORIS_COMMIT_SHA-linux-x64.tar.gz .
+              # Gitee Go 自动保存 build/ 目录产物，无需手动上传
 
-      - job: build_linux_arm64
-        name: Linux ARM64 Cross-Compile
+      # Linux x64 Clang
+      - job: build_linux_x64_clang
+        name: Linux x64 Clang
         runner: gitee-runner:ubuntu-24.04
         steps:
           - name: Checkout
-            uses: checkout@v4
+            command: |
+              cd $GITORIS_REPO_LOCAL_DIR
 
-          - name: Install Cross-Compiler
-            run: |
+          - name: Install Dependencies
+            command: |
               apt-get update
               apt-get install -y --no-install-recommends \
-                cmake ninja-build \
-                gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-                libboost-dev libyaml-cpp-dev
+                build-essential cmake ninja-build clang-18 \
+                librime-dev librime-data \
+                libboost-dev libboost-system-dev \
+                libyaml-cpp-dev libgtest-dev \
+                libmarisa-dev
 
-          - name: Configure
-            run: |
-              mkdir -p build/linux-arm64
-              cd build/linux-arm64
-              cmake ../../engine/librime \
+          - name: Configure & Build
+            command: |
+              mkdir -p build-clang
+              cd build-clang
+              cmake ../engine/synthorbis-engine \
                 -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
-                -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
-
-          - name: Build
-            run: |
-              cd build/linux-arm64
+                -DCMAKE_C_COMPILER=clang-18 \
+                -DCMAKE_CXX_COMPILER=clang++-18 \
+                -DSYNTHORBIS_PREFER_SYSTEM_RIME=ON
               ninja -j$(nproc)
 
-          - name: Upload Artifacts
-            uses: upload-artifact@v3
-            with:
-              name: librime-linux-arm64
-              path: build/linux-arm64/lib/
-              retention-days: 7
+          - name: Upload Artifact
+            command: |
+              cd build-clang
+              tar -czf ../synthorbis-engine-$GITORIS_COMMIT_SHA-linux-x64-clang.tar.gz .
+              # Gitee Go 自动保存 build-clang/ 目录产物
 
+  # ── Windows 构建 ────────────────────────────────────
   - stage: build_windows
-    name: Windows Build
-    parallel: true
+    name: Windows 构建
     jobs:
       - job: build_windows_x64
         name: Windows x64 MSVC
         runner: gitee-runner:windows-2022
         steps:
           - name: Checkout
-            uses: checkout@v4
-            with:
-              submodules: true
+            command: |
+              cd $GITORIS_REPO_LOCAL_DIR
 
-          - name: Setup MSVC
-            uses: msvc@v2
+          - name: Install librime via vcpkg
+            command: |
+              git clone --depth 1 https://gitee.com/mirrors/vcpkg.git $env:TEMP\vcpkg
+              $env:VCPKG_ROOT = "$env:TEMP\vcpkg"
+              & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat"
+              & "$env:VCPKG_ROOT\vcpkg.exe" install librime:x64-windows boost:x64-windows yaml-cpp:x64-windows
 
-          - name: Configure
-            run: |
+          - name: Configure CMake
+            command: |
+              $env:VCPKG_ROOT = "$env:TEMP\vcpkg"
               New-Item -ItemType Directory -Force -Path build | Out-Null
               Set-Location build
-              cmake ../engine/librime `
+              cmake ../engine/synthorbis-engine `
                 -G "Visual Studio 17 2022" `
                 -A x64 `
                 -DCMAKE_BUILD_TYPE=Release `
-                -DBUILD_TESTING=ON
+                -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
 
           - name: Build
-            run: |
+            command: |
               Set-Location build
               cmake --build . --config Release --parallel
 
-          - name: Test
-            run: |
+          - name: Run Tests
+            command: |
               Set-Location build
               ctest -C Release --output-on-failure -j4 || true
 
-          - name: Upload Artifacts
-            uses: upload-artifact@v3
-            with:
-              name: librime-windows-x64
-              path: build/lib/Release/
-              retention-days: 7
+          - name: Upload Artifact
+            command: |
+              Compress-Archive -Path build\* -DestinationPath synthorbis-engine-$GITORIS_COMMIT_SHA-windows-x64.zip -Force
+              # Gitee Go 自动保存 build/ 目录产物
 
+  # ── macOS 构建 ──────────────────────────────────────
   - stage: build_macos
-    name: macOS Build
+    name: macOS 构建
     jobs:
       - job: build_macos_universal
         name: macOS Universal
         runner: gitee-runner:macos-14
         steps:
           - name: Checkout
-            uses: checkout@v4
-            with:
-              submodules: true
+            command: |
+              cd $GITORIS_REPO_LOCAL_DIR
 
           - name: Install Dependencies
-            run: |
-              brew install cmake ninja boost opencc yaml-cpp
-              brew install marisa-trie || true
+            command: |
+              brew install cmake ninja boost librime yaml-cpp googletest marisa-trie
 
-          - name: Configure
-            run: |
-              mkdir -p build/macos-universal
-              cd build/macos-universal
-              cmake ../../engine/librime \
+          - name: Configure & Build
+            command: |
+              mkdir -p build
+              cd build
+              cmake ../engine/synthorbis-engine \
                 -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
-                -DBUILD_TESTING=ON \
-                -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
-
-          - name: Build
-            run: |
-              cd build/macos-universal
+                -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+                -DSYNTHORBIS_PREFER_SYSTEM_RIME=ON
               ninja -j$(sysctl -n hw.ncpu)
 
-          - name: Upload Artifacts
-            uses: upload-artifact@v3
-            with:
-              name: librime-macos-universal
-              path: build/macos-universal/lib/
-              retention-days: 7
+          - name: Upload Artifact
+            command: |
+              cd build
+              tar -czf ../synthorbis-engine-$GITORIS_COMMIT_SHA-macos-universal.tar.gz .
+              # Gitee Go 自动保存 build/ 目录产物
 
-  - stage: release
-    name: Create Release
-    condition: tag matches "v*"
-    jobs:
-      - job: create_release
-        name: Publish Release
-        runner: gitee-runner:ubuntu-24.04
-        steps:
-          - name: Checkout
-            uses: checkout@v4
-
-          - name: Download All Artifacts
-            uses: download-artifact@v3
-            with:
-              pattern: librime-*
-              path: artifacts/
-
-          - name: Create Release
-            uses: release-action@v1
-            with:
-              tag: ${{ git.ref }}
-              title: SynthOrbis UNI ${{ git.ref }}
-              note: |
-                ## SynthOrbis UNI Release
-
-                This release includes pre-built binaries for:
-                - Linux x64 (GCC)
-                - Linux ARM64
-                - Windows x64 (MSVC)
-                - macOS Universal
-
-                ### Supported Platforms
-                - Ubuntu 20.04+ / Debian 11+
-                - Windows 10/11 (x64)
-                - macOS 12+ (Intel & Apple Silicon)
-
-                ### 信创平台支持
-                - 统信 UOS V20
-                - 麒麟 V10
-                - 龙芯 LoongArch64
-                - 飞腾/鲲鹏 ARM64
-
-                ### 下一步
-                1. 下载对应平台的构建产物
-                2. 解压到项目 engine/librime 目录
-                3. 参考 docs/BUILD-LINUX-WSL.md 进行集成
-
-# ── 环境变量 ──────────────────────────────────────
-env:
-  CARGO_HOME: /opt/cargo
-  RUSTUP_HOME: /opt/rustup
-
-# ── 缓存配置 ──────────────────────────────────────
+# ── 缓存配置 ─────────────────────────────────────────
 cache:
   paths:
     - ~/.ccache
     - build/**/CMakeCache.txt
     - build/**/CMakeFiles
 
-# ── 超时设置 ──────────────────────────────────────
+# ── 超时设置 ─────────────────────────────────────────
 timeout:
-  build: 60  # minutes
-  test: 30   # minutes
+  build: 60   # minutes
+  test: 30    # minutes

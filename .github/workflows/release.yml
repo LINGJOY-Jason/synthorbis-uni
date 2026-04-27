@@ -1,4 +1,9 @@
-name: Release Pipeline
+name: SynthOrbis UNI — Release
+
+# ─────────────────────────────────────────────────────────
+# Release 流水线：手动触发或 tag 触发
+# 构建 synthorbis-engine 跨平台发布包
+# ─────────────────────────────────────────────────────────
 
 on:
   workflow_dispatch:
@@ -7,115 +12,222 @@ on:
         description: 'Release version (e.g., 1.0.0)'
         required: true
         type: string
-      prerelease:
-        description: 'Pre-release'
+      skip_test:
+        description: 'Skip tests (faster build)'
         required: false
         type: boolean
         default: false
+  push:
+    tags:
+      - 'v*'
 
 env:
-  VERSION: ${{ inputs.version }}
+  VERSION: ${{ inputs.version || github.ref_name }}
 
 jobs:
-  # ── 触发全平台构建 ───────────────────────────────
-  build-all:
-    name: Build All Platforms
-    uses: ./.github/workflows/ci.yml
-    with:
-      version: ${{ env.VERSION }}
-
-  # ── 构建 Release 包 ──────────────────────────────
-  package-release:
-    name: Package Release
-    runs-on: ubuntu-latest
-    needs: build-all
-    strategy:
-      matrix:
-        include:
-          - platform: windows-x64
-            artifact: librime-windows-x64-Release
-          - platform: linux-x64-gcc
-            artifact: librime-linux-x64-gcc-Release
-          - platform: linux-x64-clang
-            artifact: librime-linux-x64-clang-Release
-          - platform: linux-arm64
-            artifact: librime-linux-arm64-Release
-          - platform: linux-loongarch64
-            artifact: librime-linux-loongarch64-Release
-          - platform: macos-universal
-            artifact: librime-macos-universal-Release
+  # ── Linux x64 (GCC) ────────────────────────────────────
+  release-linux-x64-gcc:
+    name: Linux x64 GCC
+    runs-on: ubuntu-24.04
     steps:
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          name: ${{ matrix.artifact }}
+          submodules: true
 
-      - name: Create Release Package
+      - name: Install Dependencies
         run: |
-          mkdir -p release-${{ matrix.platform }}
-          cp -r * release-${{ matrix.platform }}/ 2>/dev/null || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build \
+            librime-dev librime-data \
+            libboost-dev libboost-system-dev \
+            libyaml-cpp-dev libgtest-dev \
+            libmarisa-dev
 
-  # ── 创建 GitHub Release ──────────────────────────
-  create-release:
-    name: Create Release
-    runs-on: ubuntu-latest
-    needs: package-release
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      - name: Configure
+        run: |
+          mkdir -p build/release
+          cd build/release
+          cmake ../../engine/synthorbis-engine \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSYNTHORBIS_PREFER_SYSTEM_RIME=ON
+
+      - name: Build
+        run: |
+          cd build/release
+          ninja -j$(nproc)
+
+      - name: Test
+        if: ${{ inputs.skip_test != true }}
+        run: |
+          cd build/release
+          ctest --output-on-failure -j$(nproc)
+
+      - name: Package
+        run: |
+          cd build/release
+          tar -czf ../../synthorbis-engine-${{ env.VERSION }}-linux-x64.tar.gz .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthorbis-engine-linux-x64-gcc-${{ env.VERSION }}
+          path: synthorbis-engine-${{ env.VERSION }}-linux-x64.tar.gz
+          retention-days: 30
+
+  # ── Linux x64 (Clang) ───────────────────────────────────
+  release-linux-x64-clang:
+    name: Linux x64 Clang
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ env.VERSION }}
-          release_name: SynthOrbis UNI v${{ env.VERSION }}
-          draft: true
-          prerelease: ${{ inputs.prerelease }}
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build clang-18 \
+            librime-dev librime-data \
+            libboost-dev libboost-system-dev \
+            libyaml-cpp-dev libgtest-dev \
+            libmarisa-dev
 
-  # ── 上传所有构建产物 ─────────────────────────────
-  upload-assets:
-    name: Upload Release Assets
-    runs-on: ubuntu-latest
-    needs: [package-release, create-release]
-    strategy:
-      matrix:
-        include:
-          - platform: windows-x64
-            artifact: librime-windows-x64-Release
-          - platform: linux-x64
-            artifact: librime-linux-x64-gcc-Release
-          - platform: macos-universal
-            artifact: librime-macos-universal-Release
+      - name: Configure & Build
+        run: |
+          mkdir -p build/release-clang
+          cd build/release-clang
+          cmake ../engine/synthorbis-engine \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang-18 \
+            -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DSYNTHORBIS_PREFER_SYSTEM_RIME=ON
+          ninja -j$(nproc)
+
+      - name: Package
+        run: |
+          cd build/release-clang
+          tar -czf ../../synthorbis-engine-${{ env.VERSION }}-linux-x64-clang.tar.gz .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthorbis-engine-linux-x64-clang-${{ env.VERSION }}
+          path: synthorbis-engine-${{ env.VERSION }}-linux-x64-clang.tar.gz
+          retention-days: 30
+
+  # ── Windows x64 (MSVC) ─────────────────────────────────
+  release-windows-x64:
+    name: Windows x64 MSVC
+    runs-on: windows-2022
     steps:
-      - name: Download Artifact
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup MSVC
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Install librime via vcpkg
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/Microsoft/vcpkg.git $env:TEMP\vcpkg
+          $env:VCPKG_ROOT = "$env:TEMP\vcpkg"
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat"
+          & "$env:VCPKG_ROOT\vcpkg.exe" install librime:x64-windows boost:x64-windows yaml-cpp:x64-windows
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          $env:VCPKG_ROOT = "$env:TEMP\vcpkg"
+          New-Item -ItemType Directory -Force -Path build\release | Out-Null
+          Set-Location build\release
+          cmake ../../engine/synthorbis-engine `
+            -G "Visual Studio 17 2022" `
+            -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
+
+      - name: Build
+        shell: pwsh
+        run: |
+          Set-Location build\release
+          cmake --build . --config Release --parallel
+
+      - name: Package
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build\release\* -DestinationPath synthorbis-engine-${{ env.VERSION }}-windows-x64.zip -Force
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthorbis-engine-windows-x64-${{ env.VERSION }}
+          path: synthorbis-engine-${{ env.VERSION }}-windows-x64.zip
+          retention-days: 30
+
+  # ── macOS Universal ───────────────────────────────────
+  release-macos:
+    name: macOS Universal
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          brew install cmake ninja boost librime yaml-cpp googletest marisa-trie
+
+      - name: Configure & Build
+        run: |
+          mkdir -p build/release
+          cd build/release
+          cmake ../engine/synthorbis-engine \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DSYNTHORBIS_PREFER_SYSTEM_RIME=ON
+          ninja -j$(sysctl -n hw.ncpu)
+
+      - name: Package
+        run: |
+          cd build/release
+          tar -czf ../../synthorbis-engine-${{ env.VERSION }}-macos-universal.tar.gz .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthorbis-engine-macos-universal-${{ env.VERSION }}
+          path: synthorbis-engine-${{ env.VERSION }}-macos-universal.tar.gz
+          retention-days: 30
+
+  # ── Create GitHub Release ───────────────────────────────
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [release-linux-x64-gcc, release-windows-x64, release-macos]
+    if: startsWith(github.ref, 'refs/tags/') || inputs.version != ''
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          pattern: synthorbis-engine-*
+          path: artifacts
+          merge-multiple: true
 
-      - name: Upload to Release
-        uses: softprops/action-gh-release@v1
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.VERSION }}
-          file: |
-            **/*
-          if_no_assets_found: warn
+          tag_name: ${{ env.VERSION }}
+          name: "SynthOrbis UNI ${{ env.VERSION }}"
+          draft: true
+          files: artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # ── 通知完成 ─────────────────────────────────────
-  notify:
-    name: Notify
-    runs-on: ubuntu-latest
-    needs: [create-release, upload-assets]
-    steps:
-      - name: Success Notification
-        run: |
-          echo "## Release v${{ env.VERSION }} Created Successfully!"
-          echo "- Draft release created at: https://github.com/${{ github.repository }}/releases"
-          echo "- All platform artifacts uploaded"
