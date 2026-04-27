@@ -74,30 +74,54 @@ endif()
 
 option(SYNTHORBIS_SKIP_RIME "Skip RIME dependency (stub/test mode)" OFF)
 
-# 先查找同级 librime 子模块
+# 先查找同级 librime 子模块（源码构建方式）
 set(RIME_MODULE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../librime")
 set(RIME_LIBRARIES "")
 set(RIME_DEFINITIONS "")
+set(RIME_INCLUDE_DIRS "")
 
-if(NOT SYNTHORBIS_SKIP_RIME AND EXISTS "${RIME_MODULE_DIR}/CMakeLists.txt")
-    message(STATUS "Found RIME module at: ${RIME_MODULE_DIR}")
-    add_subdirectory("${RIME_MODULE_DIR}" "${CMAKE_BINARY_DIR}/rime-build")
-    set(RIME_LIBRARIES rime)
-    set(RIME_DEFINITIONS HAVE_RIME)
-elseif(NOT SYNTHORBIS_SKIP_RIME)
-    # 尝试 pkg-config 查找系统 librime
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(RIME QUIET librime>=1.0)
-        if(RIME_FOUND)
-            message(STATUS "Found system librime via pkg-config")
-            set(RIME_LIBRARIES ${RIME_LIBRARIES})
+option(SYNTHORBIS_PREFER_SYSTEM_RIME "Prefer system-installed librime over submodule" OFF)
+
+if(NOT SYNTHORBIS_SKIP_RIME)
+    if(EXISTS "${RIME_MODULE_DIR}/CMakeLists.txt" AND
+       NOT SYNTHORBIS_PREFER_SYSTEM_RIME)
+        # ── 方式1：子模块源码构建 ──
+        message(STATUS "Found RIME module at: ${RIME_MODULE_DIR}")
+        add_subdirectory("${RIME_MODULE_DIR}" "${CMAKE_BINARY_DIR}/rime-build")
+        set(RIME_LIBRARIES rime)
+        set(RIME_DEFINITIONS HAVE_RIME)
+    else()
+        # ── 方式2：查找系统 librime ──
+        find_library(RIME_LIB NAMES rime
+            HINTS /usr/lib /usr/lib/x86_64-linux-gnu
+                  /usr/local/lib /opt/homebrew/lib)
+        find_path(RIME_INCLUDE_DIR NAMES rime_api.h
+            HINTS /usr/include /usr/local/include
+                  /opt/homebrew/include)
+
+        if(RIME_LIB AND RIME_INCLUDE_DIR)
+            message(STATUS "Found system librime: ${RIME_LIB}")
+            message(STATUS "Found rime_api.h at: ${RIME_INCLUDE_DIR}")
+            set(RIME_LIBRARIES "${RIME_LIB}")
+            set(RIME_INCLUDE_DIRS "${RIME_INCLUDE_DIR}")
             set(RIME_DEFINITIONS HAVE_RIME)
         else()
-            message(WARNING "RIME not found — building without RIME (stub mode)")
+            # ── 方式3：pkg-config ──
+            find_package(PkgConfig QUIET)
+            if(PkgConfig_FOUND)
+                pkg_check_modules(RIME QUIET librime>=1.0)
+                if(RIME_FOUND)
+                    message(STATUS "Found system librime via pkg-config")
+                    set(RIME_LIBRARIES ${RIME_LINK_LIBRARIES})
+                    set(RIME_INCLUDE_DIRS ${RIME_INCLUDE_DIRS})
+                    set(RIME_DEFINITIONS HAVE_RIME)
+                else()
+                    message(WARNING "RIME not found — building without RIME (stub mode)")
+                endif()
+            else()
+                message(WARNING "librime not found — building without RIME (stub mode)")
+            endif()
         endif()
-    else()
-        message(WARNING "PkgConfig not found — building without RIME (stub mode)")
     endif()
 else()
     message(STATUS "SYNTHORBIS_SKIP_RIME=ON — building in stub mode (no RIME)")
@@ -154,6 +178,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 # RIME 头文件（私有，仅编译时需要）
 if(RIME_DEFINITIONS)
     target_include_directories(${PROJECT_NAME} PRIVATE
+        ${RIME_INCLUDE_DIRS}
         "${RIME_MODULE_DIR}/src"
         "${RIME_MODULE_DIR}/include"
     )
@@ -203,8 +228,17 @@ add_executable(test_engine
     test/test_engine.cc
 )
 
+target_include_directories(test_engine PRIVATE
+    ${RIME_INCLUDE_DIRS}
+)
+
+target_compile_definitions(test_engine PRIVATE
+    ${RIME_DEFINITIONS}
+)
+
 target_link_libraries(test_engine PRIVATE
     ${PROJECT_NAME}
+    ${RIME_LIBRARIES}
 )
 
 add_test(NAME EngineTest COMMAND test_engine)

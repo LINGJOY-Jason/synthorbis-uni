@@ -56,6 +56,9 @@ typedef struct {
 // 输入适配器
 typedef struct SynthInputAdapter SynthInputAdapter;
 
+// 引擎前向声明（避免循环包含）
+typedef struct SynthEngine SynthEngine;
+
 // 输入处理结果
 typedef enum {
     SYNTH_INPUT_PROCESSED = 0,       // 事件已处理
@@ -99,6 +102,11 @@ SYNTHORBIS_API int synth_input_adapter_map_keycode(
 SYNTHORBIS_API void synth_input_adapter_set_active(
     SynthInputAdapter* adapter,
     int active);
+
+// 绑定引擎实例（设置后 process_key 会直接调用引擎）
+SYNTHORBIS_API void synth_input_adapter_set_engine(
+    SynthInputAdapter* adapter,
+    SynthEngine* engine);
 
 #ifdef __cplusplus
 }

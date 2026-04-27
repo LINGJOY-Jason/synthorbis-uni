@@ -1,6 +1,7 @@
 // SynthOrbis Input Adapter — 输入适配器实现
 
 #include "synthorbis/input_adapter.h"
+#include "synthorbis/engine.h"
 
 #include <cstring>
 
@@ -38,7 +39,7 @@ static const KeyMapping g_key_mappings[] = {
 
 struct SynthInputAdapter {
     int active;
-    void* engine;  // 关联的 SynthEngine
+    SynthEngine* engine;  // 关联的 SynthEngine
 };
 
 // ─────────────────────────────────────────────────────────
@@ -72,15 +73,19 @@ SynthInputResult synth_input_adapter_process_key(
     if (modifier & SYNTH_KEY_MOD_CONTROL) rime_modifier |= 0x4;
     if (modifier & SYNTH_KEY_MOD_ALT) rime_modifier |= 0x8;
 
-    // 映射键码
-    int rime_keycode;
+    // 映射键码到 RIME keycode
+    int rime_keycode = 0;
     if (!synth_input_adapter_map_keycode(adapter, keycode, modifier,
                                           &rime_keycode, &rime_modifier)) {
         return SYNTH_INPUT_NOT_HANDLED;
     }
 
-    // TODO: 调用 RIME 引擎处理按键
-    // rime_engine_process_key(adapter->engine, rime_keycode, rime_modifier);
+    // 调用 RIME 引擎处理按键
+    if (adapter->engine) {
+        int handled = synth_engine_process_key(adapter->engine,
+                                               rime_keycode, rime_modifier);
+        return handled ? SYNTH_INPUT_PROCESSED : SYNTH_INPUT_NOT_HANDLED;
+    }
 
     return SYNTH_INPUT_PROCESSED;
 }
@@ -160,5 +165,11 @@ int synth_input_adapter_map_keycode(
 void synth_input_adapter_set_active(SynthInputAdapter* adapter, int active) {
     if (adapter) {
         adapter->active = active;
+    }
+}
+
+void synth_input_adapter_set_engine(SynthInputAdapter* adapter, SynthEngine* engine) {
+    if (adapter) {
+        adapter->engine = engine;
     }
 }
