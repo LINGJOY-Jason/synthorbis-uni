@@ -39,10 +39,10 @@ char* sanctify_get_config_dir(void) {
 }
 
 char* sanctify_get_log_path(const char* module_name) {
-    static char path[1024];
+    char path[1024];
     snprintf(path, sizeof(path), "/data/data/com.sanctify.ime/logs/%s.log",
              module_name ? module_name : "sanctify");
-    return path;
+    return strdup(path);
 }
 
 char* sanctify_get_temp_dir(void) {

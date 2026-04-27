@@ -104,10 +104,10 @@ SANCTIFY_API char* sanctify_get_config_dir(void) {
 }
 
 SANCTIFY_API char* sanctify_get_log_path(const char* module_name) {
-    static char path[1024];
+    char path[1024];
     snprintf(path, sizeof(path), "%s/%s.log", g_log_dir,
              module_name ? module_name : "sanctify");
-    return path;
+    return strdup(path);
 }
 
 SANCTIFY_API char* sanctify_get_temp_dir(void) {

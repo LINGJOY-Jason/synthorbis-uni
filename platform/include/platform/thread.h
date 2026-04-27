@@ -134,7 +134,7 @@ SANCTIFY_API void          sanctify_tls_destroy(SanctifyTLS*);
 typedef struct SanctifyFuture SanctifyFuture;
 
 typedef void (*SanctifyAsyncFn)(void* arg, void (*cb)(void*, SanctifyStatus), void*);
-typedef void (*SanctifyFutureCallback)(SanctifyStatus, void*;
+typedef void (*SanctifyFutureCallback)(SanctifyStatus, void*);
 
 SANCTIFY_API SanctifyFuture*
 sanctify_future_create(void);

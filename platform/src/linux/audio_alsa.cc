@@ -25,8 +25,9 @@ static void* alsarec_thread(void* arg) {
     SanctifyALSAData* d = (SanctifyALSAData*)arg;
 
     const int period_frames = 1024;
-    float buffer[period_frames * d->spec.channels];
-    snd_pcm_format_t fmt = SND_PCM_FORMAT_FLOAT;
+    const int max_channels  = 8;  // 最多支持 8 声道
+    float buffer[period_frames * max_channels];
+    // snd_pcm_format_t fmt = SND_PCM_FORMAT_FLOAT;  // TODO: 用于格式配置
 
     while (d->running) {
         int rc = snd_pcm_readi(d->pcm, buffer, period_frames);
