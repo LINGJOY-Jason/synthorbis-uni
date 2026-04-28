@@ -98,7 +98,6 @@ def print_model_info(path: str, label: str = ""):
     # 统计 float32 / float16 参数量
     n_fp32 = n_fp16 = n_int8 = n_int16 = 0
     for init in model.graph.initializer:
-        import onnx.TensorProto as tp
         # data_type: 1=float32, 10=float16, 2=uint8, 3=int8
         dt = init.data_type
         if dt == 1:   n_fp32 += 1
