@@ -39,25 +39,52 @@ enum class AsrEngineType {
 };
 
 /**
+ * @brief ONNX 模型精度类型
+ *
+ * 对应量化工具产出的三种模型文件：
+ *   - Float32 : 原始全精度模型（如 model.onnx）
+ *   - Float16 : FP16 转换模型（如 model_fp16.onnx），约减小 50%
+ *   - Int8Dynamic : INT8 动态量化（如 model_int8_dynamic.onnx），约减小 75%
+ *   - Int8Static  : INT8 静态量化（如 model_int8_static.onnx），精度最优
+ *
+ * 在 AsrConfig::precision 中设置后，OnnxAsrEngine 会自动调整
+ * SessionOptions 和输入张量精度。
+ */
+enum class ModelPrecision {
+    Float32     = 0,    ///< 全精度 FP32（默认）
+    Float16     = 1,    ///< FP16（权重 + 激活）
+    Int8Dynamic = 2,    ///< INT8 动态量化
+    Int8Static  = 3,    ///< INT8 静态量化（与动态量化加载方式相同，区别在模型文件）
+    Auto        = 4,    ///< 自动检测：根据 model_path 后缀推断
+};
+
+/**
  * @brief ASR 引擎配置
  */
 struct AsrConfig {
     AsrEngineType type = AsrEngineType::Local;
-    
-    // 本地模型配置
-    std::string model_path;        // ONNX 模型路径
-    std::string tokens_path;       // 词表文件
-    int num_threads = 4;            // CPU 线程数
-    
-    // 云端配置
-    std::string api_endpoint;       // API 地址
-    std::string api_key;           // API 密钥
-    
-    // 语言设置 (0=自动检测)
-    int language = 0;
-    
-    // 文本归一化
-    bool text_normalization = true;
+
+    // ---- 本地模型配置 ----
+    std::string model_path;         ///< ONNX 模型路径
+    std::string tokens_path;        ///< 词表文件路径（token id → 字符/子词）
+    int num_threads = 4;            ///< 推理 CPU 线程数
+
+    // ---- 量化/精度配置 ----
+    ModelPrecision precision = ModelPrecision::Auto;
+                                    ///< 模型精度类型；Auto 时根据文件名后缀自动推断
+    bool enable_memory_pattern = true;
+                                    ///< ORT: 开启内存模式复用（减少推理内存分配，建议开启）
+    bool enable_cpu_mem_arena  = true;
+                                    ///< ORT: 开启 CPU 内存池（提升吞吐量）
+    int  graph_opt_level = 99;      ///< ORT graph 优化级别：0=关闭 1=基础 2=扩展 99=全部
+
+    // ---- 云端配置 ----
+    std::string api_endpoint;       ///< 云端 API 地址
+    std::string api_key;            ///< 云端 API 密钥
+
+    // ---- 语言/文本 ----
+    int  language           = 0;    ///< 语言代码（0=自动检测；SenseVoice: 0=zh 1=en 2=ja）
+    bool text_normalization = true; ///< 文本归一化（标点/数字规范化）
 };
 
 /**
