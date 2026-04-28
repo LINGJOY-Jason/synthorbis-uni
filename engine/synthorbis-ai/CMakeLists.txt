@@ -85,6 +85,8 @@ set(AI_HEADERS
     ${INCLUDE_DIR}/asr_engine.h
     ${INCLUDE_DIR}/asr_types.h
     ${INCLUDE_DIR}/fbank.h
+    ${INCLUDE_DIR}/ctc_decoder.h
+    ${INCLUDE_DIR}/onnx_engine.h
 )
 
 # ============================================================================

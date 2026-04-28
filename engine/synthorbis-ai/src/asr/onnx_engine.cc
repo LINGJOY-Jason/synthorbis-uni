@@ -8,6 +8,7 @@
 #if defined(SYNTHORBIS_AI_HAS_ONNXRUNTIME) && SYNTHORBIS_AI_HAS_ONNXRUNTIME
 
 #include "synthorbis/ai/fbank.h"
+#include "synthorbis/ai/ctc_decoder.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -60,14 +61,24 @@ int OnnxAsrEngine::initialize(const AsrConfig& config) {
         if (fin.is_open()) {
             std::string line;
             while (std::getline(fin, line)) {
-                if (!line.empty()) {
-                    vocab_.push_back(line);
-                }
+                if (!line.empty()) vocab_.push_back(line);
             }
         }
     }
-    
+
+    // 同步词表到解码器
+    decoder_.set_vocab(vocab_);
+
     return 0;
+}
+
+void OnnxAsrEngine::set_decoder_config(const CtcDecoderConfig& cfg) {
+    decoder_ = CtcDecoder(cfg);
+    decoder_.set_vocab(vocab_);
+}
+
+void OnnxAsrEngine::set_language_model(std::shared_ptr<ILanguageModel> lm) {
+    decoder_.set_lm(lm);
 }
 
 std::vector<float> OnnxAsrEngine::extract_features(const AudioData& audio) {
@@ -91,35 +102,6 @@ std::vector<float> OnnxAsrEngine::extract_features(const AudioData& audio) {
     auto result = extractor.compute(audio.data, audio.samples);
 
     return result.features;  // [num_frames, 560] 展开为一维
-}
-
-std::string OnnxAsrEngine::greedy_decode(const float* logits, int time_steps, int vocab_size) {
-    // 简单的贪婪解码
-    std::string text;
-    int last_token = -1;
-    
-    for (int t = 0; t < time_steps; ++t) {
-        // 找到最大值
-        int max_token = 0;
-        float max_prob = logits[t * vocab_size];
-        
-        for (int v = 1; v < vocab_size; ++v) {
-            if (logits[t * vocab_size + v] > max_prob) {
-                max_prob = logits[t * vocab_size + v];
-                max_token = v;
-            }
-        }
-        
-        // 去除连续重复和空白
-        if (max_token != last_token && max_token != 0) {
-            if (max_token < static_cast<int>(vocab_.size())) {
-                text += vocab_[max_token];
-            }
-        }
-        last_token = max_token;
-    }
-    
-    return text;
 }
 
 AsrResult OnnxAsrEngine::recognize(const AudioData& audio) {
@@ -197,20 +179,24 @@ AsrResult OnnxAsrEngine::recognize(const AudioData& audio) {
         return result;
     }
 
-    // ---- 5. CTC 解码 ----
+    // ---- 5. CTC 解码（Beam Search 或 Greedy）----
     if (!outputs.empty()) {
-        const float* logits   = outputs[0].GetTensorData<float>();
+        const float* logits    = outputs[0].GetTensorData<float>();
         auto         out_shape = outputs[0].GetTensorTypeAndShapeInfo().GetShape();
         // out_shape: [batch, time, vocab]
         int time_steps = static_cast<int>(out_shape.size() > 1 ? out_shape[1] : 0);
-        int vocab_size  = static_cast<int>(out_shape.size() > 2 ? out_shape[2] : 0);
+        int vocab_size = static_cast<int>(out_shape.size() > 2 ? out_shape[2] : 0);
 
         if (time_steps > 0 && vocab_size > 0) {
-            result.text = greedy_decode(logits, time_steps, vocab_size);
+            auto hyps = decoder_.decode(logits, time_steps, vocab_size);
+            if (!hyps.empty()) {
+                result.text       = hyps[0].text;
+                // 将 CTC log-prob 转换为近似置信度（sigmoid 映射到 [0,1]）
+                float norm_score  = hyps[0].ctc_score / static_cast<float>(time_steps);
+                result.confidence = 1.0f / (1.0f + std::exp(-norm_score - 2.0f));
+            }
         }
     }
-
-    result.confidence = 0.8f;  // TODO: 从模型输出中提取置信度
     auto end_time = std::chrono::high_resolution_clock::now();
     result.process_time =
         std::chrono::duration<double>(end_time - start_time).count();

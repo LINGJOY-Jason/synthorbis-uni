@@ -6,6 +6,7 @@
 #pragma once
 
 #include "synthorbis/ai/asr_engine.h"
+#include "synthorbis/ai/ctc_decoder.h"
 
 // CMake 通过 target_compile_definitions 传入：
 //   SYNTHORBIS_AI_HAS_ONNXRUNTIME=1  (找到 ORT)
@@ -32,12 +33,15 @@ public:
     AsrEngineType get_type() const override { return AsrEngineType::Local; }
     std::string get_name() const override { return "OnnxAsrEngine"; }
 
+    /** 设置解码器配置（在 initialize 之后调用） */
+    void set_decoder_config(const CtcDecoderConfig& cfg);
+
+    /** 设置 LM（可选，用于 BeamSearchLM 模式） */
+    void set_language_model(std::shared_ptr<ILanguageModel> lm);
+
 private:
     /** 提取 Fbank 特征（560 维，7 帧堆叠） */
     std::vector<float> extract_features(const AudioData& audio);
-
-    /** CTC 贪婪解码 */
-    std::string greedy_decode(const float* logits, int time_steps, int vocab_size);
 
     AsrConfig config_;
     std::unique_ptr<Ort::Env>            env_;
@@ -50,6 +54,9 @@ private:
 
     // 词表
     std::vector<std::string> vocab_;
+
+    // CTC 解码器
+    CtcDecoder decoder_;
 };
 
 } // namespace ai

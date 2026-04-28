@@ -27,6 +27,12 @@ add_executable(test_fbank test_fbank.cc)
 target_link_libraries(test_fbank
     PRIVATE synthorbis-ai GTest::gtest_main)
 
+# --- CTC 解码器测试 ---
+add_executable(test_ctc_decoder test_ctc_decoder.cc)
+target_link_libraries(test_ctc_decoder
+    PRIVATE synthorbis-ai GTest::gtest_main)
+
 include(GoogleTest)
 gtest_discover_tests(test_asr)
 gtest_discover_tests(test_fbank)
+gtest_discover_tests(test_ctc_decoder)
