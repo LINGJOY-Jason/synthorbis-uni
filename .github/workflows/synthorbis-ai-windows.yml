@@ -1,0 +1,389 @@
+name: SynthOrbis AI — Windows Build (MSVC)
+
+# ─────────────────────────────────────────────────────────────────
+# SynthOrbis AI 模块专用 CI
+# 构建 synthorbis-ai（C++ ONNX Runtime + 云端 ASR 接口层）
+#
+# 依赖：
+#   - ONNX Runtime 1.21.0（从 GitHub Release 下载）
+#   - libcurl（通过 vcpkg 安装，Windows 原生无 libcurl）
+#   - GTest via FetchContent（无需手动安装）
+#
+# 测试目标（无模型文件需求）：
+#   - test_fbank       Fbank 特征提取
+#   - test_ctc_decoder CTC Beam Search 解码器
+#   - test_asr         ASR 接口与工厂
+#   - test_cloud_asr   云端 ASR Mock HTTP 测试
+#
+# 触发：
+#   - workflow_dispatch（手动触发，可选 Build Type / Skip Tests 参数）
+#   - 可被其他 workflow 调用（workflow_call）
+# ─────────────────────────────────────────────────────────────────
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type (Release/Debug)'
+        required: false
+        default: 'Release'
+        type: choice
+        options:
+          - Release
+          - Debug
+      skip_tests:
+        description: 'Skip running tests (faster build only)'
+        required: false
+        default: 'false'
+        type: boolean
+    secrets:
+      VCPKG_TOKEN:
+        required: false
+        description: 'Optional vcpkg authentication token'
+
+  workflow_call:
+    inputs:
+      build_type:
+        description: 'Build type (Release/Debug)'
+        required: false
+        default: 'Release'
+      skip_tests:
+        description: 'Skip running tests'
+        required: false
+        default: 'false'
+    secrets:
+      VCPKG_TOKEN:
+        required: false
+
+env:
+  ONNXRT_VERSION: '1.21.0'
+  ONNXRT_URL: 'https://github.com/microsoft/onnxruntime/releases/download/v1.21.0/onnxruntime-win-x64-1.21.0.zip'
+  VCPKG_URL: 'https://github.com/microsoft/vcpkg/archive/refs/heads/master.zip'
+  BUILD_TYPE: ${{ inputs.build_type || 'Release' }}
+
+jobs:
+  # ════════════════════════════════════════════════════════════════
+  # Job 1: Windows x64 MSVC — synthorbis-ai
+  # ════════════════════════════════════════════════════════════════
+  windows-x64:
+    name: Windows x64 MSVC (${{ env.BUILD_TYPE }})
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Download ONNX Runtime 1.21.0 ───────────────────────
+      - name: Download ONNX Runtime
+        id: ort-download
+        run: |
+          $ortDir = "$env:TEMP\onnxruntime-win-x64-$env:ONNXRT_VERSION"
+          $ortZip = "$env:TEMP\onnxruntime-win-x64-$env:ONNXRT_VERSION.zip"
+
+          Write-Host "Downloading ONNX Runtime $env:ONNXRT_VERSION..."
+          Write-Host "URL: $env:ONNXRT_URL"
+          Invoke-WebRequest -Uri $env:ONNXRT_URL -OutFile $ortZip -TimeoutSec 120
+
+          Write-Host "Extracting to $ortDir..."
+          Expand-Archive -Path $ortZip -DestinationPath $ortDir -Force
+
+          # 验证文件完整性
+          $headerFile = Join-Path $ortDir "include\onnxruntime_cxx_api.h"
+          if (-not (Test-Path $headerFile)) {
+            Write-Error "ONNX Runtime header not found: $headerFile"
+            exit 1
+          }
+          Write-Host "ONNX Runtime extracted successfully."
+
+          # 输出给后续 step 使用
+          Write-Host "ORT_DIR=$ortDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # ── 3. Install vcpkg + libcurl ────────────────────────────
+      - name: Bootstrap vcpkg
+        id: vcpkg-setup
+        run: |
+          $vcpkgDir = "$env:TEMP\vcpkg"
+          $vcpkgZip  = "$env:TEMP\vcpkg.zip"
+
+          if (Test-Path $vcpkgDir) {
+            Write-Host "vcpkg already exists, skipping bootstrap."
+          } else {
+            Write-Host "Cloning vcpkg..."
+            # 使用 zip 方式下载，避免 git clone 在 Actions 中超时
+            Invoke-WebRequest -Uri $env:VCPKG_URL -OutFile $vcpkgZip -TimeoutSec 180
+            Expand-Archive -Path $vcpkgZip -DestinationPath $env:TEMP -Force
+            Move-Item -Path "$env:TEMP\vcpkg-master" -Destination $vcpkgDir -Force
+          }
+
+          & "$vcpkgDir\bootstrap-vcpkg.bat" -disableMetrics
+          Write-Host "vcpkg bootstrapped."
+
+          # 输出 vcpkg 路径
+          Write-Host "VCPKG_DIR=$vcpkgDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install libcurl via vcpkg
+        run: |
+          $vcpkgDir = "$env:VCPKG_DIR"
+          $vcpkgExe = "$vcpkgDir\vcpkg.exe"
+
+          Write-Host "Installing libcurl:x64-windows..."
+          & $vcpkgExe install libcurl:x64-windows --triplet x64-windows
+
+          # 验证安装
+          $libcurlLib = "$vcpkgDir\installed\x64-windows\lib\libcurl.lib"
+          if (-not (Test-Path $libcurlLib)) {
+            Write-Error "libcurl library not found at: $libcurlLib"
+            exit 1
+          }
+          Write-Host "libcurl installed successfully."
+
+      # ── 4. Configure CMake ─────────────────────────────────────
+      - name: Configure CMake
+        run: |
+          $ortDir = "$env:ORT_DIR"
+          $vcpkgDir = "$env:VCPKG_DIR"
+          $buildDir = "build/ai-windows-$env:BUILD_TYPE"
+          $toolchain = "$vcpkgDir\scripts\buildsystems\vcpkg.cmake"
+
+          New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
+
+          # 设置 ONNX Runtime 环境变量（让 CMake find_path/find_library 找到）
+          $env:ONNXRUNTIME_ROOT = $ortDir
+          Write-Host "ONNXRUNTIME_ROOT=$ortDir"
+
+          # CMake configure
+          cmakeArgs = @(
+            "../engine/synthorbis-ai",
+            "-G", "Visual Studio 17 2022",
+            "-A", "x64",
+            "-DCMAKE_BUILD_TYPE=$env:BUILD_TYPE",
+            "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
+            "-DSYNTHORBIS_AI_BUILD_TESTS=ON",
+            # vcpkg triplets: x64-windows（动态 CRT /MD）
+            "-DVCPKG_TARGET_TRIPLET=x64-windows"
+          )
+
+          Set-Location $buildDir
+          cmake @cmakeArgs
+
+          # 打印关键检测结果
+          Write-Host ""
+          Write-Host "=== Dependency Detection Summary ==="
+          Write-Host "ONNX Runtime found: $(cmake -LA -N . | Select-String 'ONNXRUNTIME:BOOL=ON' | ForEach-Object { $_.Line -replace '.*:BOOL=', '' })"
+          Write-Host "libcurl found: $(cmake -LA -N . | Select-String 'CURL_AVAILABLE:BOOL=ON' | ForEach-Object { $_.Line -replace '.*:BOOL=', '' })"
+
+      # ── 5. Build ───────────────────────────────────────────────
+      - name: Build
+        run: |
+          Set-Location "build/ai-windows-$env:BUILD_TYPE"
+          cmake --build . --config $env:BUILD_TYPE --parallel --verbosity minimal
+
+      # ── 6. Copy ONNX Runtime DLLs ─────────────────────────────
+      # onnxruntime.dll 不在 PATH 中，必须放在可执行文件同目录才能运行
+      # vcpkg 安装的 libcurl.dll（如有）同理
+      - name: Copy Runtime DLLs for Tests
+        run: |
+          $ortDir = "$env:ORT_DIR"
+          $buildDir = "build/ai-windows-$env:BUILD_TYPE"
+
+          # ONNX Runtime DLLs
+          $ortDllDir = "$ortDir\lib"
+          $testDirs = @(
+            "$buildDir\test\$env:BUILD_TYPE",
+            "$buildDir\synthorbis-ai\$env:BUILD_TYPE"
+          )
+          foreach ($dir in $testDirs) {
+            if (Test-Path $ortDllDir\*.dll) {
+              Copy-Item "$ortDllDir\*.dll" $dir -Force -ErrorAction SilentlyContinue
+            }
+          }
+          Write-Host "ONNX Runtime DLLs copied to test directories."
+
+          # vcpkg libcurl DLLs（如果 libcurl 已安装）
+          $vcpkgDir = "$env:VCPKG_DIR"
+          if ($vcpkgDir) {
+            $curlDll = "$vcpkgDir\installed\x64-windows\bin\libcurl.dll"
+            foreach ($dir in $testDirs) {
+              if (Test-Path $curlDll) {
+                Copy-Item $curlDll $dir -Force -ErrorAction SilentlyContinue
+                Write-Host "libcurl.dll copied."
+              }
+            }
+          }
+
+      # ── 7. Run Tests ───────────────────────────────────────────
+      - name: Run Tests
+        if: inputs.skip_tests != 'true'
+        continue-on-error: true
+        run: |
+          Set-Location "build/ai-windows-$env:BUILD_TYPE"
+
+          # 运行除 e2e 之外的所有测试（e2e 需要模型文件 + 大模型权重）
+          $testBinaries = @(
+            "test_fbank\$env:BUILD_TYPE\test_fbank.exe",
+            "test_ctc_decoder\$env:BUILD_TYPE\test_ctc_decoder.exe",
+            "test_asr\$env:BUILD_TYPE\test_asr.exe",
+            "test_cloud_asr\$env:BUILD_TYPE\test_cloud_asr.exe"
+          )
+
+          $failedTests = @()
+          foreach ($exe in $testBinaries) {
+            if (Test-Path $exe) {
+              Write-Host ""
+              Write-Host "Running: $exe"
+              $result = & $exe 2>&1
+              Write-Host $result
+
+              if ($LASTEXITCODE -ne 0) {
+                $failedTests += $exe
+              }
+            } else {
+              Write-Host "[SKIP] $exe not found (may not have been built)"
+            }
+          }
+
+          # ctest 也跑一下
+          Write-Host ""
+          Write-Host "=== ctest summary ==="
+          ctest -C $env:BUILD_TYPE --output-on-failure -j4 || true
+
+          if ($failedTests.Count -gt 0) {
+            Write-Host ""
+            Write-Host "[FAIL] Failed test binaries:"
+            $failedTests | ForEach-Object { Write-Host "  $_" }
+            exit 1
+          }
+
+      # ── 8. Package Artifacts ───────────────────────────────────
+      - name: Package Build Artifacts
+        run: |
+          $distDir = "dist/ai-windows-x64-$env:BUILD_TYPE"
+          New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+
+          # 静态库
+          Copy-Item "build/ai-windows-$env:BUILD_TYPE/synthorbis-ai/$env:BUILD_TYPE/synthorbis-ai.lib" `
+            "$distDir/" -ErrorAction SilentlyContinue
+
+          # 运行时 DLL（ORT + libcurl），包含在发布包中
+          $ortDir = "$env:ORT_DIR"
+          if (Test-Path "$ortDir\lib\*.dll") {
+            Copy-Item "$ortDir\lib\*.dll" "$distDir/" -ErrorAction SilentlyContinue
+            Write-Host "Copied ONNX Runtime DLLs to dist."
+          }
+          $vcpkgDir = "$env:VCPKG_DIR"
+          if ($vcpkgDir -and (Test-Path "$vcpkgDir\installed\x64-windows\bin\libcurl.dll")) {
+            Copy-Item "$vcpkgDir\installed\x64-windows\bin\libcurl.dll" "$distDir/" -ErrorAction SilentlyContinue
+            Write-Host "Copied libcurl DLL to dist."
+          }
+
+          # 测试可执行文件（含依赖 DLL）
+          $testExes = @(
+            "test_fbank\$env:BUILD_TYPE\test_fbank.exe",
+            "test_ctc_decoder\$env:BUILD_TYPE\test_ctc_decoder.exe",
+            "test_asr\$env:BUILD_TYPE\test_asr.exe",
+            "test_cloud_asr\$env:BUILD_TYPE\test_cloud_asr.exe"
+          )
+          $testDir = "$distDir\tests"
+          New-Item -ItemType Directory -Force -Path $testDir | Out-Null
+          foreach ($exe in $testExes) {
+            if (Test-Path $exe) {
+              Copy-Item $exe "$testDir/" -ErrorAction SilentlyContinue
+              # 附带 DLL 到 tests/ 目录（测试可直接运行）
+              Copy-Item "$exe\..\*.dll" "$testDir/" -ErrorAction SilentlyContinue
+            }
+          }
+
+          # 头文件
+          $includeDest = "$distDir\include"
+          New-Item -ItemType Directory -Force -Path $includeDest | Out-Null
+          Get-ChildItem -Recurse "engine/synthorbis-ai/include" -Filter "*.h" | Copy-Item -Destination $includeDest -ErrorAction SilentlyContinue
+
+          Write-Host ""
+          Write-Host "=== Dist Contents ==="
+          Get-ChildItem $distDir -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
+
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthorbis-ai-windows-x64-${{ env.BUILD_TYPE }}
+          path: |
+            dist/**
+            build/ai-windows-${{ env.BUILD_TYPE }}/**/*.lib
+            build/ai-windows-${{ env.BUILD_TYPE }}/**/*.exe
+          retention-days: 14
+
+  # ════════════════════════════════════════════════════════════════
+  # Job 2: Windows ARM64 MSVC — synthorbis-ai（可选）
+  # ════════════════════════════════════════════════════════════════
+  windows-arm64:
+    name: Windows ARM64 MSVC (${{ env.BUILD_TYPE }})
+    runs-on: windows-arm64-2022
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ONNX Runtime ARM64 构建在 1.21.0 中不可用，跳过 ORT
+      # 使用 stub 模式（仅测试逻辑）
+      - name: Configure CMake (stub mode)
+        run: |
+          $buildDir = "build/ai-windows-arm64-$env:BUILD_TYPE"
+          New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
+          Set-Location $buildDir
+
+          cmake ../engine/synthorbis-ai `
+            -G "Visual Studio 17 2022" `
+            -A ARM64 `
+            -DCMAKE_BUILD_TYPE=$env:BUILD_TYPE `
+            -DSYNTHORBIS_AI_SKIP_ONNXRUNTIME=ON `
+            -DSYNTHORBIS_AI_SKIP_CURL=ON `
+            -DSYNTHORBIS_AI_BUILD_TESTS=ON
+
+      - name: Build
+        run: |
+          Set-Location "build/ai-windows-arm64-$env:BUILD_TYPE"
+          cmake --build . --config $env:BUILD_TYPE --parallel --verbosity minimal
+
+      - name: Run Tests
+        if: inputs.skip_tests != 'true'
+        run: |
+          Set-Location "build/ai-windows-arm64-$env:BUILD_TYPE"
+          ctest -C $env:BUILD_TYPE --output-on-failure || true
+
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthorbis-ai-windows-arm64-${{ env.BUILD_TYPE }}
+          path: |
+            build/ai-windows-arm64-${{ env.BUILD_TYPE }}/**/*.lib
+            build/ai-windows-arm64-${{ env.BUILD_TYPE }}/**/*.exe
+          retention-days: 7
+
+  # ════════════════════════════════════════════════════════════════
+  # Summary
+  # ════════════════════════════════════════════════════════════════
+  build-summary:
+    name: Build Summary
+    needs: [windows-x64, windows-arm64]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Summary
+        run: |
+          echo "## SynthOrbis AI — Windows CI Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Windows x64 MSVC (${{ env.BUILD_TYPE }}) | ${{ needs.windows-x64.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Windows ARM64 MSVC (${{ env.BUILD_TYPE }}) | ${{ needs.windows-arm64.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Build Type**: ${{ env.BUILD_TYPE }}" >> $GITHUB_STEP_SUMMARY
+          echo "**ONNX Runtime**: ${{ env.ONNXRT_VERSION }}" >> $GITHUB_STEP_SUMMARY

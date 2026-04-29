@@ -23,6 +23,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ============================================================================
+# MSVC 运行时库（统一 /MD，避免 GTest CRT 不匹配）
+# ============================================================================
+if(MSVC)
+    # 统一使用动态 CRT (/MD)，与 vcpkg triplets:x64-windows 保持一致
+    # CMP0091: NEW = 显式设置，避免继承父项目或 CMake 默认值
+    cmake_policy(SET CMP0091 NEW)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreadedDLL)
+endif()
+
+# ============================================================================
 # 编译选项
 # ============================================================================
 if(MSVC)
@@ -88,24 +98,36 @@ endif()
 
 # ============================================================================
 # libcurl（可选，用于云端 ASR HTTP 请求）
+# - Linux/macOS: apt/Homebrew 直接安装，或 vcpkg
+# - Windows: vcpkg 安装到 installed/x64-windows/
+#   vcpkg toolchain 会自动设置 CURL_FOUND / CURL_INCLUDE_DIRS / CURL_LIBRARIES
 # ============================================================================
 option(SYNTHORBIS_AI_SKIP_CURL "Skip libcurl (cloud ASR will use stub mode)" OFF)
 
 if(NOT SYNTHORBIS_AI_SKIP_CURL)
+    # 优先使用 vcpkg/CMake 内置 FindCURL（vcpkg toolchain 自动设置）
+    # Windows: vcpkg 安装后 CURL_DIR 已由 toolchain 注入，无需额外配置
+    # Linux: find_package(CURL) 在 Ubuntu 上可直接找到
     find_package(CURL QUIET)
+
     if(CURL_FOUND)
-        message(STATUS "Found libcurl: ${CURL_LIBRARIES}")
+        # vcpkg 提供完整的 CURL_INCLUDE_DIRS / CURL_LIBRARIES
+        message(STATUS "Found libcurl: ${CURL_LIBRARIES} (include: ${CURL_INCLUDE_DIRS})")
         set(CURL_AVAILABLE TRUE)
     else()
-        # 尝试 pkg-config
-        find_package(PkgConfig QUIET)
-        if(PkgConfig_FOUND)
-            pkg_check_modules(CURL QUIET libcurl)
+        # 非 vcpkg 环境下，尝试 pkg-config（Linux/macOS）
+        if(NOT WIN32)
+            find_package(PkgConfig QUIET)
+            if(PkgConfig_FOUND)
+                pkg_check_modules(CURL QUIET libcurl)
+            endif()
         endif()
+
         if(CURL_FOUND)
             message(STATUS "Found libcurl via pkg-config")
             set(CURL_AVAILABLE TRUE)
         else()
+            # Windows 无 vcpkg，或 Linux 无 libcurl-dev → stub 模式
             message(STATUS "libcurl not found, cloud ASR will use stub HTTP client")
             set(CURL_AVAILABLE FALSE)
         endif()
