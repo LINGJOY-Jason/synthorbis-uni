@@ -37,9 +37,15 @@ add_executable(test_asr_e2e test_asr_e2e.cc)
 target_link_libraries(test_asr_e2e
     PRIVATE synthorbis-ai GTest::gtest_main)
 
+# --- 云端 ASR 引擎测试（Mock HTTP，无网络依赖）---
+add_executable(test_cloud_asr test_cloud_asr.cc)
+target_link_libraries(test_cloud_asr
+    PRIVATE synthorbis-ai GTest::gtest_main)
+
 include(GoogleTest)
 gtest_discover_tests(test_asr)
 gtest_discover_tests(test_fbank)
 gtest_discover_tests(test_ctc_decoder)
 gtest_discover_tests(test_asr_e2e TIMEOUT 300)  # 加载大模型最多等 5 分钟
+gtest_discover_tests(test_cloud_asr)
 

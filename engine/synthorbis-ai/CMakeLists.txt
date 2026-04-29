@@ -87,6 +87,35 @@ if(NOT SYNTHORBIS_AI_SKIP_ONNXRUNTIME)
 endif()
 
 # ============================================================================
+# libcurl（可选，用于云端 ASR HTTP 请求）
+# ============================================================================
+option(SYNTHORBIS_AI_SKIP_CURL "Skip libcurl (cloud ASR will use stub mode)" OFF)
+
+if(NOT SYNTHORBIS_AI_SKIP_CURL)
+    find_package(CURL QUIET)
+    if(CURL_FOUND)
+        message(STATUS "Found libcurl: ${CURL_LIBRARIES}")
+        set(CURL_AVAILABLE TRUE)
+    else()
+        # 尝试 pkg-config
+        find_package(PkgConfig QUIET)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(CURL QUIET libcurl)
+        endif()
+        if(CURL_FOUND)
+            message(STATUS "Found libcurl via pkg-config")
+            set(CURL_AVAILABLE TRUE)
+        else()
+            message(STATUS "libcurl not found, cloud ASR will use stub HTTP client")
+            set(CURL_AVAILABLE FALSE)
+        endif()
+    endif()
+else()
+    set(CURL_AVAILABLE FALSE)
+    message(STATUS "libcurl skipped (SYNTHORBIS_AI_SKIP_CURL=ON)")
+endif()
+
+# ============================================================================
 # 源文件
 # ============================================================================
 set(AI_SOURCES
@@ -94,6 +123,7 @@ set(AI_SOURCES
     ${SRC_DIR}/asr/fbank.cc
     ${SRC_DIR}/asr/onnx_engine.cc
     ${SRC_DIR}/asr/ctc_decoder.cc
+    ${SRC_DIR}/asr/cloud_asr_engine.cc
 )
 
 set(AI_HEADERS
@@ -102,6 +132,7 @@ set(AI_HEADERS
     ${INCLUDE_DIR}/fbank.h
     ${INCLUDE_DIR}/ctc_decoder.h
     ${INCLUDE_DIR}/onnx_engine.h
+    ${INCLUDE_DIR}/cloud_asr_engine.h
 )
 
 # ============================================================================
@@ -120,6 +151,15 @@ if(ONNXRUNTIME_FOUND)
     target_compile_definitions(synthorbis-ai PUBLIC SYNTHORBIS_AI_HAS_ONNXRUNTIME=1)
 else()
     target_compile_definitions(synthorbis-ai PUBLIC SYNTHORBIS_AI_HAS_ONNXRUNTIME=0)
+endif()
+
+# libcurl 可选链接
+if(CURL_AVAILABLE)
+    target_include_directories(synthorbis-ai PRIVATE ${CURL_INCLUDE_DIRS})
+    target_link_libraries(synthorbis-ai PRIVATE ${CURL_LIBRARIES})
+    target_compile_definitions(synthorbis-ai PUBLIC SYNTHORBIS_AI_HAS_CURL=1)
+else()
+    target_compile_definitions(synthorbis-ai PUBLIC SYNTHORBIS_AI_HAS_CURL=0)
 endif()
 
 # Windows 导出
