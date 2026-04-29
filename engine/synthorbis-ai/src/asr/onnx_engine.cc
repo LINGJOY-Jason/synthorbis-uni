@@ -146,7 +146,16 @@ int OnnxAsrEngine::initialize(const AsrConfig& config) {
         if (fin.is_open()) {
             std::string line;
             while (std::getline(fin, line)) {
-                if (!line.empty()) vocab_.push_back(line);
+                if (!line.empty()) {
+                    // 词表格式可能是 "token\tscore"（SentencePiece 格式）
+                    // 只取 tab 之前的部分作为 token
+                    auto tab_pos = line.find('\t');
+                    if (tab_pos != std::string::npos) {
+                        vocab_.push_back(line.substr(0, tab_pos));
+                    } else {
+                        vocab_.push_back(line);
+                    }
+                }
             }
         }
     }
@@ -230,7 +239,8 @@ AsrResult OnnxAsrEngine::recognize(const AudioData& audio) {
     }
 
     std::vector<Ort::Value> input_tensors;
-    std::vector<uint16_t>   speech_fp16;  // 持有 FP16 数据（keep-io-types=true 时不需要）
+    std::vector<uint16_t>   speech_fp16;   // FP16 分支数据（外部作用域，保证生命周期）
+    std::vector<float>      speech_fp32;   // FP32 分支数据（外部作用域，保证生命周期）
 
     if (need_fp16_speech) {
         // FP32 → FP16 转换（简单截断，实际部署建议使用 onnxconverter 保持 keep_io_types）
@@ -252,27 +262,28 @@ AsrResult OnnxAsrEngine::recognize(const AudioData& audio) {
                 mem_info, speech_fp16.data(), speech_fp16.size(),
                 speech_shape.data(), speech_shape.size()));
     } else {
-        std::vector<float> speech_data(features);
+        speech_fp32 = features;  // 数据生命周期与 input_tensors 对齐
         input_tensors.push_back(
             Ort::Value::CreateTensor<float>(
-                mem_info, speech_data.data(), speech_data.size(),
+                mem_info, speech_fp32.data(), speech_fp32.size(),
                 speech_shape.data(), speech_shape.size()));
     }
 
-    std::vector<int64_t> lengths_data  = {static_cast<int64_t>(num_frames)};
-    std::vector<int64_t> language_data = {static_cast<int64_t>(config_.language)};
-    std::vector<int64_t> textnorm_data = {config_.text_normalization ? 1LL : 0LL};
+    // SenseVoice 模型要求 int32 输入（speech_lengths / language / textnorm）
+    std::vector<int32_t> lengths_data  = {static_cast<int32_t>(num_frames)};
+    std::vector<int32_t> language_data = {static_cast<int32_t>(config_.language)};
+    std::vector<int32_t> textnorm_data = {config_.text_normalization ? 1 : 0};
 
     input_tensors.push_back(
-        Ort::Value::CreateTensor<int64_t>(
+        Ort::Value::CreateTensor<int32_t>(
             mem_info, lengths_data.data(), lengths_data.size(),
             scalar_shape.data(), scalar_shape.size()));
     input_tensors.push_back(
-        Ort::Value::CreateTensor<int64_t>(
+        Ort::Value::CreateTensor<int32_t>(
             mem_info, language_data.data(), language_data.size(),
             scalar_shape.data(), scalar_shape.size()));
     input_tensors.push_back(
-        Ort::Value::CreateTensor<int64_t>(
+        Ort::Value::CreateTensor<int32_t>(
             mem_info, textnorm_data.data(), textnorm_data.size(),
             scalar_shape.data(), scalar_shape.size()));
 
@@ -289,12 +300,18 @@ AsrResult OnnxAsrEngine::recognize(const AudioData& audio) {
     for (const auto& n : output_names_) output_names_c.push_back(n.c_str());
 
     // ---- 4. 推理 ----
+    // ORT 1.17+ Run() 要求: input_names (char* const*), input_values (const Value*),
+    //   input_count, output_names (char* const*), output_count
     std::vector<Ort::Value> outputs;
     try {
+        Ort::RunOptions run_opts{nullptr};
         outputs = session_->Run(
-            Ort::RunOptions{nullptr},
-            input_names_c.data(),  input_tensors.size(),
-            output_names_c.data(), output_names_c.size());
+            run_opts,
+            input_names_c.data(),
+            input_tensors.data(),
+            input_tensors.size(),
+            output_names_c.data(),
+            output_names_c.size());
     } catch (const Ort::Exception&) {
         auto t_end = std::chrono::high_resolution_clock::now();
         result.process_time =

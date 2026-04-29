@@ -32,7 +32,14 @@ add_executable(test_ctc_decoder test_ctc_decoder.cc)
 target_link_libraries(test_ctc_decoder
     PRIVATE synthorbis-ai GTest::gtest_main)
 
+# --- 端到端 ASR 集成测试（需要 ORT + 模型文件）---
+add_executable(test_asr_e2e test_asr_e2e.cc)
+target_link_libraries(test_asr_e2e
+    PRIVATE synthorbis-ai GTest::gtest_main)
+
 include(GoogleTest)
 gtest_discover_tests(test_asr)
 gtest_discover_tests(test_fbank)
 gtest_discover_tests(test_ctc_decoder)
+gtest_discover_tests(test_asr_e2e TIMEOUT 300)  # 加载大模型最多等 5 分钟
+

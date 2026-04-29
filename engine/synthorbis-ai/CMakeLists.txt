@@ -43,13 +43,28 @@ set(SRC_DIR "src")
 if(NOT SYNTHORBIS_AI_SKIP_ONNXRUNTIME)
     if(WIN32)
         # Windows: 使用 vcpkg 或手动安装的 ONNX Runtime
+        # 自动检测工作区内 deps/onnxruntime-win-x64-* 目录
+        file(GLOB _ORT_CANDIDATE_DIRS
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../deps/onnxruntime-win-x64-*"
+        )
+        set(_ORT_INCLUDE_HINTS "")
+        set(_ORT_LIB_HINTS "")
+        foreach(_d ${_ORT_CANDIDATE_DIRS})
+            list(APPEND _ORT_INCLUDE_HINTS "${_d}/include")
+            list(APPEND _ORT_LIB_HINTS     "${_d}/lib")
+        endforeach()
+
         find_path(ONNXRUNTIME_INCLUDE_DIRS "onnxruntime_cxx_api.h"
-            PATHS "$ENV{ONNXRUNTIME_ROOT}/include" 
+            PATHS
+                  ${_ORT_INCLUDE_HINTS}
+                  "$ENV{ONNXRUNTIME_ROOT}/include"
                   "C:/onnxruntime/include"
                   "C:/lib/onnxruntime/include"
         )
         find_library(ONNXRUNTIME_LIBRARIES onnxruntime onnxruntime_cxx
-            PATHS "$ENV{ONNXRUNTIME_ROOT}/lib"
+            PATHS
+                  ${_ORT_LIB_HINTS}
+                  "$ENV{ONNXRUNTIME_ROOT}/lib"
                   "C:/onnxruntime/lib"
                   "C:/lib/onnxruntime/lib"
         )
@@ -100,7 +115,7 @@ target_include_directories(synthorbis-ai PUBLIC
 )
 
 if(ONNXRUNTIME_FOUND)
-    target_include_directories(synthorbis-ai PRIVATE ${ONNXRUNTIME_INCLUDE_DIRS})
+    target_include_directories(synthorbis-ai PUBLIC ${ONNXRUNTIME_INCLUDE_DIRS})
     target_link_libraries(synthorbis-ai PRIVATE ${ONNXRUNTIME_LIBRARIES})
     target_compile_definitions(synthorbis-ai PUBLIC SYNTHORBIS_AI_HAS_ONNXRUNTIME=1)
 else()
