@@ -2,7 +2,7 @@
  * @file cloud_asr_engine.h
  * @brief 云端 ASR 引擎接口
  *
- * 支持两个云端 ASR 服务：
+ * 支持三个云端 ASR 服务：
  *   1. 智谱 GLM-ASR  (BigModel / zhipuai.cn)
  *      - 接口: POST https://open.bigmodel.cn/api/paas/v4/audio/transcriptions
  *      - 鉴权: Authorization: Bearer {api_key}
@@ -12,6 +12,13 @@
  *      - 接口: POST https://openspeech.bytedance.com/api/v1/asr
  *      - 鉴权: Authorization: Bearer {api_key} + appid header
  *      - 格式: application/json，PCM base64 编码
+ *
+ *   3. 阿里云 NLS 一句话识别 (aliyun.com)
+ *      - 接口: POST https://nls-gateway-cn-shanghai.aliyuncs.com/stream/v1/asr
+ *      - 鉴权: X-NLS-Token: {token}（需通过 AccessKey 预先换取）
+ *      - 格式: application/octet-stream，直接上传二进制音频（WAV/PCM）
+ *      - 参数: URL query 参数携带 appkey、format、sample_rate 等
+ *      - 响应: {"task_id":"...","result":"...","status":20000000,"message":"SUCCESS"}
  *
  * 降级逻辑：
  *   端侧 OnnxAsrEngine 失败时，自动路由到 CloudAsrEngine。
@@ -40,9 +47,10 @@ namespace ai {
 // ============================================================
 
 enum class CloudProvider {
-    ZhipuGLM,        ///< 智谱 GLM-ASR (bigmodel.cn)
-    VolcengineDouBao, ///< 火山引擎豆包 ASR (volcengine.com)
-    Custom           ///< 自定义 endpoint（通用 OpenAI-compatible）
+    ZhipuGLM,         ///< 智谱 GLM-ASR (bigmodel.cn)
+    VolcengineDouBao,  ///< 火山引擎豆包 ASR (volcengine.com)
+    AliyunNLS,         ///< 阿里云 NLS 一句话识别 (aliyun.com)
+    Custom             ///< 自定义 endpoint（通用 OpenAI-compatible）
 };
 
 // ============================================================
@@ -53,9 +61,14 @@ struct CloudAsrConfig {
     CloudProvider provider = CloudProvider::ZhipuGLM;
 
     // ---- 通用认证 ----
-    std::string api_key;           ///< API Key
+    std::string api_key;           ///< API Key（智谱/豆包）
     std::string app_id;            ///< App ID（豆包必填）
     std::string endpoint;          ///< 自定义 endpoint（Custom 模式必填，其他可覆盖默认）
+
+    // ---- 阿里云 NLS 专用认证 ----
+    std::string nls_token;         ///< NLS Token（由 AccessKey 换取，有效期 24h）
+    std::string nls_appkey;        ///< NLS Project Appkey（控制台应用 Key）
+    std::string nls_region;        ///< NLS 地区（"cn-shanghai"/"cn-beijing"，默认 "cn-shanghai"）
 
     // ---- 请求参数 ----
     std::string model;             ///< 模型名称（智谱: "glm-4-voice-flash"; 豆包: "bigmodel"）
@@ -63,7 +76,7 @@ struct CloudAsrConfig {
     int         timeout_ms = 10000;///< HTTP 请求超时（毫秒），默认 10 秒
     int         max_retries = 2;   ///< 最大重试次数
 
-    // ---- 音频参数（豆包需要显式指定）----
+    // ---- 音频参数（豆包 / 阿里云 NLS 需要显式指定）----
     int         sample_rate = 16000;  ///< 采样率
     int         bits        = 16;     ///< 位深（8/16）
     int         channels    = 1;      ///< 声道数
@@ -130,6 +143,19 @@ public:
         const std::string& url,
         const std::vector<std::string>& headers,
         const std::string& json_body,
+        int timeout_ms) = 0;
+
+    /**
+     * @brief 发送 application/octet-stream POST 请求（阿里云 NLS 一句话识别）
+     * @param url        完整请求 URL（含 query 参数）
+     * @param headers    HTTP Header 列表（含 X-NLS-Token）
+     * @param data       二进制音频数据（WAV 或 PCM raw）
+     * @param timeout_ms 超时毫秒
+     */
+    virtual HttpResponse post_binary(
+        const std::string& url,
+        const std::vector<std::string>& headers,
+        const std::vector<uint8_t>& data,
         int timeout_ms) = 0;
 };
 
@@ -227,6 +253,27 @@ private:
      * @param json_body  如: {"code":0,"result":{"text":"..."}}
      */
     std::string parse_doubao_response(const std::string& json_body);
+
+    // ---- 阿里云 NLS 一句话识别实现 ----
+    /**
+     * @brief 调用阿里云 NLS 一句话识别 REST API
+     *
+     * 接口：POST https://nls-gateway-cn-{region}.aliyuncs.com/stream/v1/asr
+     * 鉴权：X-NLS-Token: {nls_token}
+     * Body：application/octet-stream 直接上传 WAV/PCM 二进制流
+     * URL参数：appkey / format / sample_rate / enable_punctuation_prediction
+     *
+     * @param audio  音频数据（float PCM）
+     * @return HTTP 响应
+     */
+    HttpResponse call_aliyun(const AudioData& audio);
+
+    /**
+     * @brief 解析阿里云 NLS 响应 JSON
+     * @param json_body  如: {"task_id":"...","result":"...","status":20000000,"message":"SUCCESS"}
+     * @return 识别文本（失败返回空字符串）
+     */
+    std::string parse_aliyun_response(const std::string& json_body);
 
     // ---- 通用工具 ----
     /**

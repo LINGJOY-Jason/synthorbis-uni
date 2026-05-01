@@ -2,9 +2,10 @@
  * @file cloud_asr_engine.cc
  * @brief 云端 ASR 引擎实现
  *
- * 实现两个云端 ASR 服务的 REST 封装：
+ * 实现三个云端 ASR 服务的 REST 封装：
  *   - 智谱 GLM-ASR：multipart/form-data + WAV 上传
  *   - 火山引擎豆包 ASR：JSON + PCM base64
+ *   - 阿里云 NLS 一句话识别：application/octet-stream + WAV 二进制 + URL 参数
  *
  * HTTP 实现：
  *   - 若编译时 SYNTHORBIS_AI_HAS_CURL=1，使用 libcurl
@@ -344,6 +345,54 @@ public:
 
         return resp;
     }
+
+    HttpResponse post_binary(
+        const std::string& url,
+        const std::vector<std::string>& headers,
+        const std::vector<uint8_t>& data,
+        int timeout_ms) override
+    {
+        HttpResponse resp;
+        CURL* curl = curl_easy_init();
+        if (!curl) {
+            resp.error_msg = "curl_easy_init() failed";
+            return resp;
+        }
+
+        auto t0 = std::chrono::steady_clock::now();
+
+        struct curl_slist* hdr = nullptr;
+        hdr = curl_slist_append(hdr, "Content-Type: application/octet-stream");
+        for (const auto& h : headers) {
+            hdr = curl_slist_append(hdr, h.c_str());
+        }
+
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, reinterpret_cast<const char*>(data.data()));
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)data.size());
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdr);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, (long)timeout_ms);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp.body);
+
+        CURLcode res = curl_easy_perform(curl);
+        if (res != CURLE_OK) {
+            resp.error_msg = curl_easy_strerror(res);
+        } else {
+            long code = 0;
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
+            resp.status_code = static_cast<int>(code);
+        }
+
+        auto t1b = std::chrono::steady_clock::now();
+        resp.elapsed_ms = std::chrono::duration<double, std::milli>(t1b - t0).count();
+
+        curl_slist_free_all(hdr);
+        curl_easy_cleanup(curl);
+
+        return resp;
+    }
 };
 
 } // anonymous namespace
@@ -377,6 +426,18 @@ public:
         const std::string& /*url*/,
         const std::vector<std::string>& /*headers*/,
         const std::string& /*json_body*/,
+        int /*timeout_ms*/) override
+    {
+        HttpResponse r;
+        r.status_code = 0;
+        r.error_msg = "libcurl not available (SYNTHORBIS_AI_HAS_CURL=0)";
+        return r;
+    }
+
+    HttpResponse post_binary(
+        const std::string& /*url*/,
+        const std::vector<std::string>& /*headers*/,
+        const std::vector<uint8_t>& /*data*/,
         int /*timeout_ms*/) override
     {
         HttpResponse r;
@@ -429,6 +490,9 @@ int CloudAsrEngine::initialize(const AsrConfig& config) {
         } else if (cloud_cfg_.endpoint.find("bytedance.com") != std::string::npos ||
                    cloud_cfg_.endpoint.find("volcengine.com") != std::string::npos) {
             cloud_cfg_.provider = CloudProvider::VolcengineDouBao;
+        } else if (cloud_cfg_.endpoint.find("aliyuncs.com") != std::string::npos ||
+                   cloud_cfg_.endpoint.find("nls-gateway") != std::string::npos) {
+            cloud_cfg_.provider = CloudProvider::AliyunNLS;
         }
     }
     // 默认模型
@@ -438,6 +502,7 @@ int CloudAsrEngine::initialize(const AsrConfig& config) {
         } else if (cloud_cfg_.provider == CloudProvider::VolcengineDouBao) {
             cloud_cfg_.model = "bigmodel";
         }
+        // AliyunNLS 无模型字段
     }
 
     initialized_ = true;
@@ -461,6 +526,7 @@ std::string CloudAsrEngine::get_name() const {
     switch (cloud_cfg_.provider) {
         case CloudProvider::ZhipuGLM:         return "CloudAsrEngine(ZhipuGLM)";
         case CloudProvider::VolcengineDouBao:  return "CloudAsrEngine(DouBao)";
+        case CloudProvider::AliyunNLS:         return "CloudAsrEngine(AliyunNLS)";
         case CloudProvider::Custom:            return "CloudAsrEngine(Custom)";
         default:                               return "CloudAsrEngine";
     }
@@ -510,6 +576,9 @@ AsrResult CloudAsrEngine::recognize_with_retry(const AudioData& audio) {
             case CloudProvider::VolcengineDouBao:
                 resp = call_doubao(audio);
                 break;
+            case CloudProvider::AliyunNLS:
+                resp = call_aliyun(audio);
+                break;
             default:
                 resp = call_zhipu(audio);
                 break;
@@ -530,6 +599,8 @@ AsrResult CloudAsrEngine::recognize_with_retry(const AudioData& audio) {
         std::string text;
         if (cloud_cfg_.provider == CloudProvider::ZhipuGLM) {
             text = parse_zhipu_response(resp.body);
+        } else if (cloud_cfg_.provider == CloudProvider::AliyunNLS) {
+            text = parse_aliyun_response(resp.body);
         } else {
             text = parse_doubao_response(resp.body);
         }
@@ -675,6 +746,72 @@ std::string CloudAsrEngine::parse_doubao_response(const std::string& json_body) 
 
     // 最后直接取顶层 text
     return extract_json_string(json_body, "text");
+}
+
+// ============================================================
+// 阿里云 NLS 一句话识别实现
+// ============================================================
+
+HttpResponse CloudAsrEngine::call_aliyun(const AudioData& audio) {
+    // 阿里云 NLS REST API:
+    //   POST https://nls-gateway-cn-{region}.aliyuncs.com/stream/v1/asr
+    //       ?appkey={appkey}&format=pcm&sample_rate=16000
+    //       &enable_punctuation_prediction=true
+    //       &enable_inverse_text_normalization=true
+    //   Header:
+    //     X-NLS-Token: {nls_token}
+    //     Content-Type: application/octet-stream
+    //   Body: 原始 WAV 二进制（不是 base64）
+
+    // 确定 region 和 endpoint
+    std::string region = cloud_cfg_.nls_region.empty() ? "cn-shanghai" : cloud_cfg_.nls_region;
+
+    std::string base_url;
+    if (!cloud_cfg_.endpoint.empty()) {
+        base_url = cloud_cfg_.endpoint;
+    } else {
+        base_url = "https://nls-gateway-" + region + ".aliyuncs.com/stream/v1/asr";
+    }
+
+    // 构建 URL query 参数
+    std::string appkey = cloud_cfg_.nls_appkey.empty() ? cloud_cfg_.app_id : cloud_cfg_.nls_appkey;
+    std::string url = base_url
+        + "?appkey=" + appkey
+        + "&format=pcm"
+        + "&sample_rate=" + std::to_string(cloud_cfg_.sample_rate)
+        + "&enable_punctuation_prediction=true"
+        + "&enable_inverse_text_normalization=true";
+
+    // 鉴权 Header：X-NLS-Token
+    std::vector<std::string> headers;
+    std::string token = cloud_cfg_.nls_token.empty() ? cloud_cfg_.api_key : cloud_cfg_.nls_token;
+    headers.push_back("X-NLS-Token: " + token);
+
+    // 上传 PCM 原始数据（int16，直接 body，不加 WAV header）
+    // 注：阿里云 NLS format=pcm 期望的是裸 PCM，但支持 WAV，为保持一致统一传 WAV
+    auto wav_data = pcm_to_wav(audio);
+
+    return http_client_->post_binary(url, headers, wav_data, cloud_cfg_.timeout_ms);
+}
+
+std::string CloudAsrEngine::parse_aliyun_response(const std::string& json_body) {
+    // 阿里云 NLS 成功响应格式：
+    //   {"task_id":"cf7b...","result":"北京的天气。","status":20000000,"message":"SUCCESS"}
+    //
+    // 失败响应格式：
+    //   {"task_id":"8bae...","result":"","status":40000001,"message":"Gateway:ACCESS_DENIED:..."}
+
+    if (json_body.empty()) return "";
+
+    // 检查状态码（20000000 = 成功）
+    auto status_str = extract_json_string(json_body, "status");
+    if (!status_str.empty() && status_str != "20000000") {
+        // 记录错误消息但返回空，让调用方触发重试
+        return "";
+    }
+
+    // 取 result 字段
+    return extract_json_string(json_body, "result");
 }
 
 // ============================================================
